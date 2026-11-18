@@ -2,7 +2,7 @@
 
 <div dir="rtl">
 
-> ملحوظة: ده الإعداد الأصلي بملفين، سايبينه عشان الفيديو الأول. الموديولات الحالية بتستخدم flags مختلفة لـ `agy` ومعاها أمر تثبيت واحد. بص على README بتاع Module 9 (`Module 9 Claude + Antigravity + Opencode/README.md`).
+> ملحوظة: ده الإعداد الأصلي بملفين، سايبينه عشان الفيديو الأول. الموديولات الحالية بتستخدم flags مختلفة لـ `agy` ومعاها أمر تثبيت واحد. بص على README بتاع Claude + Antigravity + Opencode (Flash) (`Claude + Antigravity + Opencode (Flash)/README.md`).
 
 Claude Code (تطبيق الديسكتوب، موديل Opus) بيخطط ويراجع ويتحقق. و Gemini 4 Argon هو اللي بيكتب الكود عن طريق أداة Antigravity CLI من Google، واسمها `agy`. اتبع الخطوات بالترتيب، وانسخ كل أمر زي ما هو بالظبط.
 
