@@ -45,8 +45,8 @@ QUOTA_RE='quota|rate limit|usage limit|limit reached|429|exhausted|try again lat
 # Model IDs. Edit IDs here and in CLAUDE.md together.
 ID_LUNA="gpt-6-luna"
 ID_TERRA="gpt-6.1-terra"
-ID_SOL="gpt-6.1-sol"
-# Astra (gpt-6-astra) is deliberately not used.
+ID_SOL="gpt-6.2-sol"
+# Astra (gpt-6.2-astra) is deliberately not used.
 
 RUN_DIR=".m7"                              # run folder in the project: briefs, logs (scratch files go in $RUN_DIR/logs)
 

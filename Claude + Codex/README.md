@@ -137,7 +137,7 @@ The installer adds an allow-list to `.claude/settings.json`: the runner script, 
 | Who | Role |
 |---|---|
 | **Opus** (your Claude session) | The boss. Plans, routes, reviews the big diffs. Never builds bulk work. |
-| **sol** (`gpt-6.1-sol`) | Default builder (medium). Hard multi-file or tricky logic (high). |
+| **sol** (`gpt-6.2-sol`) | Default builder (medium). Hard multi-file or tricky logic (high). |
 | **terra** (`gpt-6.1-terra`) | Docs, copy, content pages. |
 | **luna** (`gpt-6-luna`) | Scout (low). Tests, formatting, boilerplate, mechanical edits (medium). |
 | **`claude-sonnet-builder`** | Design shells and first drafts. Security, auth, secrets. Fix rounds. In Claude only mode: design, S = 2, docs and the rest. |
@@ -146,7 +146,7 @@ The installer adds an allow-list to `.claude/settings.json`: the runner script, 
 | **`scout`** | Claude only mode only (Codex limit hit, you said Claude only): all read-only work (search, explain, research), with file and line evidence. Never edits. |
 | **`sonnet-reviewer`** | Reads one task's diff, returns PASS or FAIL. Read-only. |
 
-Model IDs are from learn.chatgpt.com/docs/models, checked 2026-10-29. Astra (`gpt-6-astra`) is deliberately not used.
+Model IDs are from learn.chatgpt.com/docs/models, checked 2026-11-19. Astra (`gpt-6.2-astra`) is deliberately not used.
 
 **Why Claude reviews and fixes:** third-party benchmarks (vals.ai, benchlm.ai) put both Sol and Terra below Claude Sonnet 5.5 at coding. So Codex builds the volume, and Claude checks it.
 
