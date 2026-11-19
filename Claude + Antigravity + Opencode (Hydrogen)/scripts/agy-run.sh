@@ -12,15 +12,20 @@
 #   hydrogen-medium -> gemini-4-hydrogen-medium  builds, lighter effort
 #   hydrogen-low    -> gemini-4-hydrogen-low     builds, trivial work
 #   hydrogen-xhigh  -> gemini-4-hydrogen-xhigh   builds, heaviest Hydrogen effort
-#   flash-high -> gemini-3.8-flash-high      last-resort exact-spec builder (Hydrogen and OpenCode build drained). --owns none is refused
 #   flash      -> gemini-3.8-flash-medium    read-only scouting. --owns must be none
 #   flash-low  -> gemini-3.8-flash-low       read-only lookups. --owns must be none
-#   argon      -> gemini-4-argon-medium      hard builds and fix steps
-#   argon-high -> gemini-4-argon-high        the hardest builds
+#   neon        -> gemini-4-neon-high        HARD TASKS and fix steps. --owns none is refused
+#   neon-high   -> gemini-4-neon-high        same as neon
+#   neon-xhigh  -> gemini-4-neon-xhigh       the hardest tasks, heaviest effort
+#   neon-medium -> gemini-4-neon-medium      hard tasks, lighter effort
+#   neon-low    -> gemini-4-neon-low         trivial work
+#   argon      -> gemini-4-argon-medium      FALLBACK builder: last resort for builds, hard tasks when the Gemini pool is drained, fix steps
+#   argon-high -> gemini-4-argon-high        the hardest tasks when the Gemini pool is drained
 #   argon-low  -> gemini-4-argon-low         trivial work
 #   sonnet     -> claude-sonnet-5-5-medium   fix tasks only: slug ends in -r1..-r5 and --owns is not none
 #   opus       -> claude-opus-5-5-medium     fix tasks only: same rule
 # One model per call. There is no chain walk: the main session re-routes.
+# Flash never builds (it shares the Hydrogen quota, so it is no fallback): Flash is read-only scouting only.
 #
 # Exit codes:
 #   0 success (report printed)
@@ -30,8 +35,9 @@
 #     (owned files may be partly edited)
 #   4 suspected concurrency limit: first line "concurrency: <quoted text>". No marker is written
 #
-# Markers: .claude/agy-quota/<model-id>, two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
+# Markers: .claude/agy-quota/<name>, two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
 # until = the reset time parsed from the output, else now + 6 hours (a guess: agy reset times are unpublished).
+# <name> is the model id (Argon, agy Sonnet/Opus) or `gemini-pool` (Hydrogen, Neon and Flash share one quota; see pool_of).
 # Legacy markers (one line, a bare ISO time) count as active for 6 hours from that time.
 # With --status: prints active markers and "agy: N models limited". Always exit 0.
 #
@@ -67,7 +73,10 @@ alias_id() {   # prints the agy model id for an alias, or returns 1
     hydrogen-medium) echo "gemini-4-hydrogen-medium" ;;
     hydrogen-low)    echo "gemini-4-hydrogen-low" ;;
     hydrogen-xhigh)  echo "gemini-4-hydrogen-xhigh" ;;
-    flash-high) echo "gemini-3.8-flash-high" ;;
+    neon|neon-high) echo "gemini-4-neon-high" ;;
+    neon-xhigh)  echo "gemini-4-neon-xhigh" ;;
+    neon-medium) echo "gemini-4-neon-medium" ;;
+    neon-low)    echo "gemini-4-neon-low" ;;
     flash)      echo "gemini-3.8-flash-medium" ;;
     flash-low)  echo "gemini-3.8-flash-low" ;;
     argon)      echo "gemini-4-argon-medium" ;;
@@ -110,6 +119,18 @@ marker_until() {    # prints the until time (UTC ISO) if the model's marker is a
   fi
   [[ "$e" =~ ^[0-9]+$ ]] || return 0
   [ "$(date +%s)" -lt "$e" ] && echo "$u"
+  return 0
+}
+
+# Gemini quota pool: Hydrogen, Neon and Flash share ONE quota (weekly + 5-hour limits; confirmed from the user's
+# Antigravity usage screen, 2026-11-19). When one of them is drained, all are. The pool has ONE marker, `gemini-pool`.
+# Argon has its own separate weekly limit, so it keeps its own per-model marker. agy Sonnet/Opus (Claude and GPT pool) too.
+pool_of() { case "$1" in gemini-4-hydrogen-*|gemini-4-neon-*|gemini-3.8-flash-*) echo gemini-pool ;; esac; }
+drain_until() {     # $1 model id: prints the until time if the model OR its pool has an active marker
+  local u p
+  u=$(marker_until "$1")
+  if [ -z "$u" ]; then p=$(pool_of "$1"); [ -n "$p" ] && u=$(marker_until "$p"); fi
+  [ -n "$u" ] && echo "$u"
   return 0
 }
 
@@ -166,11 +187,11 @@ ID=$(alias_id "$MODEL") || die "refused: model not allowed in this module ($MODE
 case "$MODEL" in
   hydrogen|hydrogen-*)
     [ $READONLY -eq 0 ] || die "refused: $MODEL builds need a real --owns list (use OpenCode scout or flash for read-only scouting)" ;;
-  flash-high)
-    [ $READONLY -eq 0 ] || die "refused: flash-high builds need a real --owns list (use flash for read-only scouting)"
-    if [[ "$TASK" =~ -r[1-9]$ ]]; then die "refused: Flash never fixes or reviews (slug $TASK looks like a fix round)"; fi ;;
+  neon|neon-*)
+    [ $READONLY -eq 0 ] || die "refused: $MODEL builds need a real --owns list (use OpenCode scout or flash for read-only scouting)" ;;
   flash|flash-low)
-    [ $READONLY -eq 1 ] || die "refused: $MODEL is read-only scouting, --owns must be none" ;;
+    [ $READONLY -eq 1 ] || die "refused: $MODEL is read-only scouting, --owns must be none (Flash never builds)"
+    if [[ "$TASK" =~ -r[1-9]$ ]]; then die "refused: Flash never fixes or reviews (slug $TASK looks like a fix round)"; fi ;;
   sonnet|opus)
     if [ $READONLY -eq 1 ] || ! [[ "$TASK" =~ -r[1-5]$ ]]; then die "refused: sonnet/opus are fix-only (slug ends in -r1..-r5, owns is not none)"; fi ;;
 esac
@@ -192,7 +213,7 @@ if [[ "$RUN_TIMEOUT" =~ ^[0-9]+$ ]] && [ "$RUN_TIMEOUT" -gt 0 ]; then
 fi
 
 # ---- Marker check: a drained model is not run ----
-u=$(marker_until "$ID")
+u=$(drain_until "$ID")
 if [ -n "$u" ]; then
   echo "drained: $ID until $u (marker)"
   exit 3
@@ -217,11 +238,21 @@ build_brief() {
   } > "$BRIEF_OUT"
 }
 
-write_marker() {   # $1 model id  $2 until epoch  $3 reason. Atomic: temp file in the same dir, then mv
+write_marker() {   # $1 marker name  $2 until epoch  $3 reason. Atomic: temp file in the same dir, then mv
   local t
   t=$(mktemp "$QDIR/.tmp.XXXXXX")
   { echo "until=$(to_iso "$2")"; echo "reason=$3"; } > "$t"
   mv -f "$t" "$QDIR/$1"
+}
+write_marker_for() {   # $1 model id  $2 until epoch  $3 reason: pool models write the shared pool marker
+  local p
+  p=$(pool_of "$1")
+  # "not available to ..." means this ONE model is not on the plan: that is not a drained pool
+  if [ -n "$p" ] && ! printf '%s' "$3" | grep -Eiq 'not available'; then
+    write_marker "$p" "$2" "$1: $3"
+  else
+    write_marker "$1" "$2" "$3"
+  fi
 }
 
 # parse_reset <logfile>: prints a reset time as epoch seconds, or nothing. Best effort.
@@ -336,7 +367,7 @@ if [ $limited -eq 1 ]; then
   now=$(date +%s)
   reset=$(parse_reset "$LOG")
   until_e=$((now + LIMIT_DEFAULT)); [ -n "$reset" ] && until_e=$reset   # 6h default is a guess
-  write_marker "$ID" "$until_e" "$qline"
+  write_marker_for "$ID" "$until_e" "$qline"
   echo "drained: $ID until $(to_iso "$until_e")"
   report "none (drained)"
   exit 3

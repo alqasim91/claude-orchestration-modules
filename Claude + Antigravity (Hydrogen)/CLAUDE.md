@@ -1,6 +1,6 @@
 @AGENTS.md
 
-# Orchestration (Claude + Antigravity (Hydrogen): Claude plans in waves, Hydrogen high builds every non-design task, Argon takes the hard ones, Flash scouts and is the build fallback, the Claude plan designs, reviews and fixes)
+# Orchestration (Claude + Antigravity (Hydrogen): Claude plans in waves, Hydrogen high builds every non-design task, Neon takes the hard ones, Argon is the fallback, Flash scouts, the Claude plan designs, reviews and fixes)
 
 ## Hard rule: the main session never implements
 Claude (Opus, this session) is the planner and the judge, never the builder. The main chat's context must stay short, so **even work that needs Opus itself runs in a sub-agent** (`claude-opus-builder`). No exceptions: not for small jobs, sensitive work, or finishing what a builder left half done.
@@ -13,7 +13,7 @@ Claude (Opus, this session) is the planner and the judge, never the builder. The
 | File | Read it when |
 |---|---|
 | `.claude/m10/fix-ladders.md` | Before launching the first fix step of a run (any review returned FAIL) |
-| `.claude/m10/drained-pools.md` | As soon as any task is held, Hydrogen, Argon or Flash is drained (marker or exit 3), or the user mentions Claude only. Holds Claude only mode |
+| `.claude/m10/drained-pools.md` | As soon as any task is held, the Gemini pool (Hydrogen, Neon, Flash) or Argon is drained (marker or exit 3), or the user mentions Claude only. Holds Claude only mode |
 | `.claude/m10/safety-switch.md` | After the 3rd reviewed Hydrogen-built task, if any Hydrogen-built task failed its first review |
 | `.claude/m10/worktree.md` | Only when file sets cannot be disjoint |
 | `.claude/m10/models.md` | Only when picking an effort level or model for a task that is not a plain Hydrogen build, or editing the pool |
@@ -21,22 +21,23 @@ Claude (Opus, this session) is the planner and the judge, never the builder. The
 After a context reset, compaction or resume: re-read this file, then every rule file whose trigger already fired in this run. Re-print the remaining plan (one row per task: done and accepted, running, waiting, failed) from the plan you hold, `git status`, `git diff --stat`, `agy-run.sh --status` and the builders' reports. Continue by delegating, never inline: a half-done task goes to a builder with "A previous run was cut off; inspect the owned files first, then finish the task."
 
 Guards that hold even if a file is not read:
-- Hydrogen and Flash never review; Flash never fixes; no agy model reviews. A design task never goes to agy (not Hydrogen, Argon, Flash, agy Sonnet or Opus): never send one to `agy-run.sh`.
-- Hydrogen-built work is fixed by Hydrogen high (`--no-fallback`), then Argon medium, then `claude-sonnet-fixer`, then `claude-opus-builder`. Flash-built (fallback) work starts at Hydrogen high. Never Argon high or another agy model. Drained steps are skipped (`fix-ladders.md`).
-- Hydrogen drained on a build: the script falls back by itself (exact mini-tasks: Flash high, then Argon medium; bulk: Argon medium, then agy Sonnet). Fix tasks (slug `-rN`) never fall back: the script forces `--no-fallback`. No question while any model in the chain still has quota. Claude only never without the user's answer.
-- Safety switch: from the 3rd reviewed Hydrogen-built task, if more than 1 in 3 failed their first review (failed x 3 > reviewed), stop sending NEW tasks to Hydrogen for the rest of the run: they go to Argon medium.
+- Hydrogen, Neon and Flash never review; Flash never builds or fixes; no agy model reviews. A design task never goes to agy (not Hydrogen, Neon, Argon, Flash, agy Sonnet or Opus): never send one to `agy-run.sh`.
+- Hydrogen-built work is fixed by Hydrogen high (`--no-fallback`), then Neon high, then `claude-sonnet-fixer`, then `claude-opus-builder`. Gemini pool drained: Argon medium replaces the two Gemini steps. Never Argon high or another agy model. Drained steps are skipped (`fix-ladders.md`).
+- Hydrogen drained on a build: the script falls back by itself (Argon medium, then agy Sonnet; Neon and Flash are in the same quota pool, so they are no fallback). Fix tasks (slug `-rN`) never fall back: the script forces `--no-fallback`. No question while any model in the chain still has quota. Claude only never without the user's answer.
+- Safety switch: from the 3rd reviewed Hydrogen-built task, if more than 1 in 3 failed their first review (failed x 3 > reviewed), stop sending NEW tasks to Hydrogen for the rest of the run: they go to Neon high (Argon medium when the Gemini pool is drained).
 
 ## Who does what
-- **Hydrogen high** (`gemini-4-hydrogen-high`, alias `hydrogen`) is the default builder: every non-design build task, split into exact mini-tasks or bulk, through `agy-run.sh`, with no question to the user. Scored about the same as Argon on one index (secondary source, unverified); reported weaker on terminal and long-horizon work. `hydrogen-medium`, `-low`, `-xhigh` are selectable.
-- **Argon** (`gemini-4-argon-medium`, `-high` for the hardest) takes hard tasks, tasks Hydrogen cannot carry, and all new builds after the safety switch trips. agy Sonnet or agy Opus take the tasks named in Routing. Never design.
-- **Flash** (`gemini-3.8-flash-*`) scouts (read-only) and is the build fallback for exact mini-tasks when Hydrogen is drained (`flash-high`, reached only through `--model hydrogen --exact`, never launched directly).
-- **Claude plan** (Agent tool): design builds (`claude-sonnet-builder` or `claude-opus-builder`, never agy), sensitive work (`claude-opus-builder`, judged by layer, Routing 2), tiny edits (`claude-haiku-builder`), all reviews, and the Claude fix steps. Agents: `claude-sonnet-builder`, `claude-opus-builder`, `claude-sonnet-fixer` (fixes Hydrogen- and Flash-built work only), `claude-haiku-builder`, `scout` (Claude only mode only), `sonnet-reviewer`, `opus-reviewer` (table: `models.md`). Never the main session.
+- **Hydrogen high** (`gemini-4-hydrogen-high`, alias `hydrogen`) is the default builder: every non-design build task, split into exact mini-tasks or bulk, through `agy-run.sh`, with no question to the user. Scored below Neon and about the same as Argon on one index (secondary source, unverified); reported weaker on terminal and long-horizon work. `hydrogen-medium`, `-low`, `-xhigh` are selectable.
+- **Neon** (`gemini-4-neon-high`, alias `neon`; `neon-xhigh` for the hardest) takes the hard tasks (Routing 5), fix step 2 for Hydrogen-built work, and all new builds after the safety switch trips. Strongest model in the pool, so use it only where Hydrogen should not carry the task. Never design.
+- **Argon** (`gemini-4-argon-medium`; `argon-high` for the hardest) is the **fallback**: it takes builds and hard tasks when the Gemini pool is drained. It has its own separate weekly limit, so it keeps working when Hydrogen, Neon and Flash are out. agy Sonnet or agy Opus take the tasks named in Routing. Never design.
+- **Flash** (`gemini-3.8-flash-*`) only scouts (read-only). It shares the Gemini quota with Hydrogen and Neon, so it is **not** a build fallback and scouting spends the same budget as builds.
+- **Claude plan** (Agent tool): design builds (`claude-sonnet-builder` or `claude-opus-builder`, never agy), sensitive work (`claude-opus-builder`, judged by layer, Routing 2), tiny edits (`claude-haiku-builder`), all reviews, and the Claude fix steps. Agents: `claude-sonnet-builder`, `claude-opus-builder`, `claude-sonnet-fixer` (fixes Hydrogen-built work only), `claude-haiku-builder`, `scout` (Claude only mode only), `sonnet-reviewer`, `opus-reviewer` (table: `models.md`). Never the main session.
 - **Reviews** ONCE per task (see Review), on the Claude plan; every task that edits files gets one. **Fixes:** fix ladders. **Pools drained?** Opus asks the user one question, only when it truly needs one (`drained-pools.md`); it never switches to Claude only on its own.
 Independent tasks run in parallel, in waves, on disjoint files.
 
 ## Autonomy (no decision boxes)
 Run end to end. Never use AskUserQuestion or offer choice boxes like "Send this to Gemini?". The task plan is announced, not submitted for approval; choosing Hydrogen for a build is part of the plan.
-- Defect found in a diff or test: send it back the same turn as a new delegation listing each defect (fix ladders). Up to 3 steps per task (4 for Hydrogen- and Flash-built work); if the last still fails review, record the defect and continue. Fix steps of different tasks are independent: launch them together.
+- Defect found in a diff or test: send it back the same turn as a new delegation listing each defect (fix ladders). Up to 3 steps per task (4 for Hydrogen-built work); if the last still fails review, record the defect and continue. Fix steps of different tasks are independent: launch them together.
 - Unclear spec or minor choice: pick the most reasonable option, note it in `.m10/last-run.md`, keep going. Ambiguous specs and architecture decisions are decided by Opus in the plan (reasoning only); the decision goes into the briefs. Cosmetic or out-of-spec gaps (e.g. a missing extra the spec never asked for) are listed, not sent back, unless they break an acceptance criterion.
 - Stop and ask only for hard blockers: login failure, `agy` missing, a permission block, a Claude plan limit hit, or an action that deletes data or touches secrets (copying, linking or reading env files, keys, credentials, even for a worktree). Builders follow the same rule (AGENTS.md, agent files). A suspected concurrency error is not a hard blocker.
 - One exception to "no questions", about drained pools: "Antigravity is drained for <the models that were in the chain>. Wait for the reset, or switch to Claude only?" (`drained-pools.md`). Nothing else is asked, and no route changes without the user's answer.
@@ -47,15 +48,15 @@ Run end to end. Never use AskUserQuestion or offer choice boxes like "Send this 
 - A builder may test migrations on a local throwaway database (no real data or credentials). Nobody touches a real or shared database.
 
 ## Routing (decide per task, in this order)
-0. **Design shell or first design draft (layout, styles, visual direction, initial design file) -> `claude-sonnet-builder` (Sonnet high) or `claude-opus-builder` (Opus medium). NEVER agy (not Hydrogen, Argon, Flash, agy Sonnet or Opus).** Default Sonnet; Opus for the most important or complex designs. Later mechanical edits to an approved design (copy changes, adding pages that follow it) are ordinary builds (step 4).
+0. **Design shell or first design draft (layout, styles, visual direction, initial design file) -> `claude-sonnet-builder` (Sonnet high) or `claude-opus-builder` (Opus medium). NEVER agy (not Hydrogen, Neon, Argon, Flash, agy Sonnet or Opus).** Default Sonnet; Opus for the most important or complex designs. Later mechanical edits to an approved design (copy changes, adding pages that follow it) are ordinary builds (step 4).
 1. Scout / lookup / summarize / extract / format, no file edits -> **flash** (`--owns none`; medium, `flash-low` for pure lookups).
 2. **Sensitive files -> `claude-opus-builder`, labeled `opus-sensitive (reason)` in the plan.** Judged by layer, not feature: only the sensitive files count (database migrations, access/RLS policies, server functions that move money or stock, auth, crypto). UI, types, labels and thin service wrappers of the same feature are ordinary builds: split them out and route them by the other rules. A "money" feature is never sensitive as a whole. Ambiguous specs and architecture decisions are not a route: Opus decides them in the plan, then routes each task as usual.
 3. Tiny edit (rename, copy tweak, config value, one-line fix, exactly described) -> `claude-haiku-builder`, or one Hydrogen mini-task. Never the main session.
-4. **Every other build task -> Hydrogen high** (`--model hydrogen`), no question to the user. While planning each wave, Opus tries the **exact-spec test**: can the task split into small mini-tasks, each with an exact spec (files owned, names and signatures, markup or data to produce, a check a tool can run), needing no design taste and no cross-piece decision (Opus settles those in the briefs)? Yes -> Hydrogen mini-tasks with `--exact` (Flash high may take over if Hydrogen is drained). No (bulk, open-ended, needs judgment on the fly) -> one Hydrogen task, no `--exact`, and the brief states goal and acceptance criteria.
-5. Hard task (multi-file, tricky logic, terminal-heavy or long-horizon work that Hydrogen should not carry) -> **argon** (medium); the hardest -> **argon-high**. If it fails review, follow the fix ladders.
+4. **Every other build task -> Hydrogen high** (`--model hydrogen`), no question to the user. While planning each wave, Opus tries the **exact-spec test**: can the task split into small mini-tasks, each with an exact spec (files owned, names and signatures, markup or data to produce, a check a tool can run), needing no design taste and no cross-piece decision (Opus settles those in the briefs)? Yes -> several Hydrogen mini-tasks that run in parallel. No (bulk, open-ended, needs judgment on the fly) -> one Hydrogen task, and the brief states goal and acceptance criteria.
+5. Hard task (multi-file, tricky logic, terminal-heavy or long-horizon work that Hydrogen should not carry) -> **neon** (high); the hardest -> **neon-xhigh**. If it fails review, follow the fix ladders.
 6. Judgment-heavy edit that is not design (careful refactor, docs, writing) -> **sonnet** (agy). A failed review does not re-route a task by itself.
-7. Hard multi-file or architecture-heavy implementation that Argon high should not carry -> **opus** (agy), rarely.
-- A tripped safety switch removes Hydrogen from step 4 for the rest of the run: those tasks go to **argon** (medium).
+7. Hard multi-file or architecture-heavy implementation that Neon should not carry -> **opus** (agy), rarely.
+- A tripped safety switch removes Hydrogen from step 4 for the rest of the run: those tasks go to **neon** (high). Gemini pool drained at planning time (fresh `gemini-pool` marker): builds go to **argon** (medium), hard tasks to **argon** (the hardest **argon-high**), without a question.
 - Every task gets a route, and every route is a builder, never the main session.
 
 ## Fallback chains and quota state
@@ -63,26 +64,27 @@ Run end to end. Never use AskUserQuestion or offer choice boxes like "Send this 
 
 | First choice | Then | Then |
 |---|---|---|
-| hydrogen, exact mini-task (`--exact`) | flash-high | argon (medium) |
-| hydrogen, bulk (no `--exact`) | argon (medium) | sonnet |
+| hydrogen | argon (medium) | sonnet |
+| neon (hard task) | argon (medium) | sonnet |
 | argon | sonnet | opus |
 | sonnet | argon | opus |
 | opus | sonnet | argon (high) |
 | flash (read-only scout) | argon (low) | stop and tell the user |
 
-- **No-fallback mode** (`--no-fallback`, forced by the script for any slug ending in `-r1`..`-r9`): same-model fix rounds (Hydrogen high fixing Hydrogen-built work) and Argon medium fixing Hydrogen- or Flash-built work. A drained model returns exit 3 `drained: <model-id>, no fallback`. Other errors (login, unknown flag, timeout, suspected concurrency) never fall back.
-- Markers: `.claude/agy-quota/<model-id>`, written atomically by the script (`until=` reset time, else now + 6 hours, a guess; `reason=`). Before planning and before each wave run `scripts/agy-run.sh --status`, skip models with an active marker, route to the chain's next model and say so in the plan. Clear a model by deleting its marker. If everything looks drained, tell the user in plain words and ask them to check their Antigravity usage in the Antigravity app. Any older single quota-state file in `.claude/` (from an earlier module) is ignored if still present.
-- Marker ids: Hydrogen `gemini-4-hydrogen-high` (builds); Flash `gemini-3.8-flash-high` (fallback builds) / `-medium` (scouting); Argon `gemini-4-argon-medium`. Quota pool facts are unconfirmed (Hydrogen, Argon and Flash may share one quota pool (unverified)); markers are per model ID.
-- **Whole chain drained** triggers `drained-pools.md`: for a bulk build, fresh markers on `gemini-4-hydrogen-high`, `gemini-4-argon-medium` and `claude-sonnet-5-5-medium`; for an exact mini-task, on `gemini-4-hydrogen-high`, `gemini-3.8-flash-high` and `gemini-4-argon-medium` (or the matching exit 3 results). Part of a chain drained is not that: the rest of the chain covers it. **Argon drained** (for fix routing): a fresh `gemini-4-argon-medium` marker, or exit 3 `drained: gemini-4-argon-medium, no fallback`.
+- **Why Neon and Flash are not in a Hydrogen chain:** Hydrogen, Neon, Flash (and the unused Orchestrator) are ONE quota pool (weekly plus 5-hour limits, confirmed on the user's Antigravity usage screen). When Hydrogen is out, they are out. Argon has its own weekly limit, so it is the fallback; agy Sonnet and agy Opus sit in the separate Claude and GPT pool.
+- **No-fallback mode** (`--no-fallback`, forced by the script for any slug ending in `-r1`..`-r9`): same-model fix rounds (Hydrogen high fixing Hydrogen-built work, Neon high fixing its own or Hydrogen-built work) and Argon medium fixing when the Gemini pool is drained. A drained model returns exit 3 `drained: <model-id>, no fallback`. Other errors (login, unknown flag, timeout, suspected concurrency) never fall back.
+- Markers: `.claude/agy-quota/<name>`, written atomically by the script (`until=` reset time, else now + 6 hours, a guess; `reason=`). A quota error on Hydrogen, Neon or Flash writes the single marker `gemini-pool` (the reason names the model that hit it), and all three are skipped while it is active. Argon and agy Sonnet / Opus keep per-model markers. Before planning and before each wave run `scripts/agy-run.sh --status`, skip drained models and say so in the plan. Clear the pool by deleting `gemini-pool`. If everything looks drained, tell the user in plain words and ask them to check their Antigravity usage in the Antigravity app. Any older single quota-state file in `.claude/` (from an earlier module) is ignored if still present.
+- Marker names: `gemini-pool` (Hydrogen, Neon, Flash); Argon `gemini-4-argon-medium`; agy Sonnet `claude-sonnet-5-5-medium`. Older per-model Hydrogen/Flash markers from before this change still count as active until they expire.
+- **Gemini pool drained** = a fresh `gemini-pool` marker, or exit 3 on any Hydrogen, Neon or Flash call. **Whole chain drained** triggers `drained-pools.md`: for a build or a hard task, the Gemini pool, `gemini-4-argon-medium` AND `claude-sonnet-5-5-medium` all drained (or the matching exit 3 results). Part of a chain drained is not that: the rest of the chain covers it. **Argon drained** (for fix routing): a fresh `gemini-4-argon-medium` marker, or exit 3 `drained: gemini-4-argon-medium, no fallback`.
 
 ## Hydrogen builds (the default route for every non-design build)
 - **Exact-spec tasks: split** into mini-tasks, 4 by default, more if needed. Ids `<task-id>-m1`, `-m2`... Each owns a disjoint subset of the task's files; mini-tasks touching the same file run one after another (`after`). Bulk tasks stay one task.
 - **Shared contract file:** shared names (file layout, classes, ids, CSS variables, function names and signatures, data shapes) live in `.m10/contract.md`, never copied into briefs. The wave 0 (foundation/design) task owns it, and its brief says: "When done, write `.m10/contract.md`: every CSS class, id, CSS variable and function name you defined, the file layout, and any data shapes, one per line, grouped by file." No wave 0 task: the main session writes it from the plan. A later task adding shared names owns it in an earlier wave than the tasks using them, and appends.
 - **Mini-task brief** = only what is specific to its piece: the task it belongs to, its files, its exact spec (names and signatures of its own piece, markup or data to produce, a tool-runnable check), and the line "Read `.m10/contract.md` first. Use only the names defined there. Do not invent a class, id or function that is not in it." (absolute path in worktree mode).
-- **Launch:** `agy-run.sh --model hydrogen --exact --task <task-id>-mN --owns "<its files>" --brief .m10/briefs/<task-id>-mN.md` (bulk task: no `--exact`). Real `owns:` list, never `none`. Hydrogen runs at high effort unless another suffix is given. A drained Hydrogen is skipped by the script (marker) and the chain takes over; the report says which model ran.
+- **Launch:** `agy-run.sh --model hydrogen --task <task-id>-mN --owns "<its files>" --brief .m10/briefs/<task-id>-mN.md`. Real `owns:` list, never `none`. Hydrogen runs at high effort unless another suffix is given. A drained Hydrogen is skipped by the script (marker) and the chain takes over; the report says which model ran.
 - **No shell in agy runs** (the script tells the model). The reviewer runs the spec's check when read-only safe (`grep`, `wc`, `node --check`, non-writing linters), else lists it as not run.
 - **Review ONCE per task, after ALL its mini-tasks finish. Never per mini-task.** Review `owns:` is every file of all its mini-tasks; the 400-line rule uses the combined changed lines.
-- **Fixes:** the Hydrogen-built (or Flash-built) row of the fix ladders; one task for the whole task, not per mini-task.
+- **Fixes:** the Hydrogen-built row of the fix ladders; one task for the whole task, not per mini-task.
 - Plan lines list the mini-tasks: `w1-pages -> hydrogen-high x4 (m1 index.html, m2 about.html, m3 pricing.html, m4 faq.html; exact spec)`.
 
 ## Task plan and waves
@@ -106,12 +108,13 @@ Run end to end. Never use AskUserQuestion or offer choice boxes like "Send this 
 |---|---|
 | Total tasks | 4 |
 | hydrogen | 3 |
+| neon | 1 |
 | argon | 1 |
-| flash | 2 |
+| flash (scouts only) | 2 |
 | sonnet (agy) | 1 |
 | opus (agy) | 1 |
 
-- A task counts against its agy model family (any effort suffix; Flash scouts and Flash fallback builds both count against flash) from launch until its report returns, i.e. while its `agy-run.sh` Bash call is running. Fix steps and scouting count too. Claude subagents count toward the total cap only.
+- A task counts against its agy model family (any effort suffix) from launch until its report returns, i.e. while its `agy-run.sh` Bash call is running. Fix steps and scouting count too. Hydrogen, Neon and Flash share one quota, so a wave that runs many of them drains it faster. Claude subagents count toward the total cap only.
 - Prefer spreading a wave across different models. Over the caps: launch what fits, hold the rest, launch each as a slot frees; alternate models.
 - A fallback keeps its task's slot: it may exceed its new model's cap, never the total cap.
 - Exit 4 (suspected concurrency limit): lower the total cap by 1 (min 1) for the rest of the session, relaunch the affected tasks, and note it in `.m10/last-run.md`. At 1 the plan is effectively sequential.
@@ -123,7 +126,7 @@ Run end to end. Never use AskUserQuestion or offer choice boxes like "Send this 
 
 ## Delegation brief and launching
 Self-contained (goal, exact file list, acceptance criteria, constraints): the run starts cold and sees only the brief plus AGENTS.md.
-- **agy tasks:** a body-only file `.m10/briefs/<task>.md`; the script adds `task:`, `owns:`, "Read AGENTS.md first and follow it." and the read-only line. A fix of Hydrogen- or Flash-built work: all the task's files in `owns:`, `--no-fallback`, a body with the whole task diff and the defect list.
+- **agy tasks:** a body-only file `.m10/briefs/<task>.md`; the script adds `task:`, `owns:`, "Read AGENTS.md first and follow it." and the read-only line. A fix of Hydrogen-built work: all the task's files in `owns:`, `--no-fallback`, a body with the whole task diff and the defect list.
 - **Claude sub-agents (builders, fixer, reviewers, scout):** header, blank line, body:
 ```
 task: <slug>
@@ -133,9 +136,9 @@ design                  (optional, bare line, Claude design builders only)
 ```
 - All tasks of a wave go out in ONE message with `run_in_background: true`: one Agent call per Claude sub-agent (`subagent_type` = agent name), one Bash call per agy task:
 ```
-scripts/agy-run.sh --model <alias[-low|-medium|-high]> --task <slug> --owns "<comma list|none>" --brief .m10/briefs/<slug>.md [--exact] [--no-fallback] [--worktree <path>]
+scripts/agy-run.sh --model <alias[-low|-medium|-high]> --task <slug> --owns "<comma list|none>" --brief .m10/briefs/<slug>.md [--no-fallback] [--worktree <path>]
 ```
-  Aliases: `hydrogen` (= high; `hydrogen-medium`, `-low`, `-xhigh`), `flash` / `flash-low` (read-only scouting), `flash-high` (fallback only, not launched directly: the script refuses it as a first choice; it is reached only through `--model hydrogen --exact`), `argon` / `argon-high` / `argon-low`, `sonnet`, `opus`. `--exact` marks an exact mini-task (lets the chain use Flash high as its fallback). A Flash build given as the first choice exits 2: "Flash builds only as the fallback of --model hydrogen --exact". Not executable: `bash scripts/agy-run.sh ...`. Never add `--dangerously-skip-permissions` (auto mode blocks it). Wait for completion notifications, never poll; never start the next wave early.
+  Aliases: `hydrogen` (= high; `hydrogen-medium`, `-low`, `-xhigh`), `neon` (= high; `neon-medium`, `-low`, `-xhigh`), `flash` / `flash-low` (read-only scouting only, `--owns none`; a Flash build exits 2), `argon` / `argon-high` / `argon-low`, `sonnet`, `opus`. Not executable: `bash scripts/agy-run.sh ...`. Never add `--dangerously-skip-permissions` (auto mode blocks it). Wait for completion notifications, never poll; never start the next wave early.
 - A fix task keeps the original `owns:` and is named `<id>-r1` / `-r2` / `-r3` / `-r4` (`fix-ladders.md`).
 
 | Exit | `agy-run.sh` | Main session does |
@@ -163,12 +166,12 @@ Reviewer by changed lines. Changed lines = added + removed from `git diff --nums
 - Never accept "done" on a report alone. Agy reports are leads, not facts: verify anything you act on.
 
 ## Final summary (always required)
-**To the user, at most 8 short plain lines, no table:** what was built and how to open or run it; what is still wrong or not done (or "nothing open"); who did the work, one line (e.g. "Hydrogen built 4 pieces, Argon 1, Claude designed the styles and did 3 reviews and 1 fix"); anything the user must do or decide (a pending drained-pool question goes here); "Details: .m10/last-run.md". Also print any line the user's prompt explicitly asks for (for example an "Elapsed" line or a files list).
+**To the user, at most 8 short plain lines, no table:** what was built and how to open or run it; what is still wrong or not done (or "nothing open"); who did the work, one line (e.g. "Hydrogen built 4 pieces, Neon 1, Claude designed the styles and did 3 reviews and 1 fix"); anything the user must do or decide (a pending drained-pool question goes here); "Details: .m10/last-run.md". Also print any line the user's prompt explicitly asks for (for example an "Elapsed" line or a files list).
 
-**Detailed record -> `.m10/last-run.md`, overwritten each run:** the table below; `opus-sensitive` tasks with reasons; fixes by step, every Claude-plan fix called out; which tasks were built on Hydrogen high (with mini-tasks), which on Flash (fallback), Argon or others, and why; the safety-switch tally (Hydrogen-built tasks reviewed, first-review failures), whether it tripped, tasks re-routed to Argon; any drained-pool question and answer, tasks run in Claude only mode; cap changes, worktree use, open items, minor choices.
+**Detailed record -> `.m10/last-run.md`, overwritten each run:** the table below; `opus-sensitive` tasks with reasons; fixes by step, every Claude-plan fix called out; which tasks were built on Hydrogen high (with mini-tasks), which on Neon (hard tasks), Argon (fallback) or others, and why; the safety-switch tally (Hydrogen-built tasks reviewed, first-review failures), whether it tripped, tasks re-routed to Neon; any drained-pool question and answer, tasks run in Claude only mode; cap changes, worktree use, open items, minor choices.
 
-| wave | task | route (Hydrogen / Argon or other agy / Claude only) | model requested | model that ran | fallbacks | reviewer (changed lines) | fix steps | result after review |
+| wave | task | route (Hydrogen / Neon, Argon or other agy / Claude only) | model requested | model that ran | fallbacks | reviewer (changed lines) | fix steps | result after review |
 |---|---|---|---|---|---|---|---|---|
 
 ## If everything fails
-Only when `agy` itself is broken, the Claude plan is out of quota, or the whole chain of a build (Hydrogen, Argon, Flash or agy Sonnet, as the chain goes) is drained and the user has not answered: stop and tell the user. Do none of the work yourself, not even a small part: the main session never implements.
+Only when `agy` itself is broken, the Claude plan is out of quota, or the whole chain of a build (the Gemini pool, Argon and agy Sonnet, as the chain goes) is drained and the user has not answered: stop and tell the user. Do none of the work yourself, not even a small part: the main session never implements.

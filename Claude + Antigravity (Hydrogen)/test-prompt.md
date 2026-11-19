@@ -60,30 +60,30 @@ Print: files created, whether the self-check passed, issues found and fixed, and
 - A plan table is printed first, before any work starts or any file is edited, with a route for every task (sensitive ones labeled `opus-sensitive (reason)`). `scripts/agy-run.sh --status` ran before it.
 - The main chat edits no project files and runs no builds: every edit, even sensitive work, comes from a builder. It only launches builders and scripts, writes files under `.m10/`, and reads short reports.
 - Sensitive means the sensitive files only (migrations, access policies, money or stock functions, auth, crypto) and those go to `claude-opus-builder`; the UI, types and labels of the same feature go through normal routing.
-- The design and styles task went to `claude-sonnet-builder` or `claude-opus-builder`, never to `agy` (not Hydrogen, Argon or Flash). That task owned `.m10/contract.md` and wrote it; mini-task briefs say "Read `.m10/contract.md` first" and do not repeat the names.
-- Parallel tasks were launched together in one message, and no two of them own the same file. Hydrogen and Argon tasks ran as background `scripts/agy-run.sh` calls (no relay sub-agent).
-- Every non-design build task went to Hydrogen high (`--model hydrogen`). Tasks that split appear as Hydrogen-high tasks with mini-tasks (`-m1`, `-m2`, ... about 4 each, `--exact`, same-file mini-tasks in sequence, briefs that point to the shared contract file); tasks Opus could not spec exactly appear as one Hydrogen task. Argon appears only for hard tasks.
-- The scout checks (links, accessibility, leftover text) went to Flash, and Opus verified what they reported before anything was changed.
+- The design and styles task went to `claude-sonnet-builder` or `claude-opus-builder`, never to `agy` (not Hydrogen, Neon, Argon or Flash). That task owned `.m10/contract.md` and wrote it; mini-task briefs say "Read `.m10/contract.md` first" and do not repeat the names.
+- Parallel tasks were launched together in one message, and no two of them own the same file. Hydrogen and Neon tasks ran as background `scripts/agy-run.sh` calls (no relay sub-agent).
+- Every non-design build task went to Hydrogen high (`--model hydrogen`). Tasks that split appear as Hydrogen-high tasks with mini-tasks (`-m1`, `-m2`, ... about 4 each, same-file mini-tasks in sequence, briefs that point to the shared contract file); tasks Opus could not spec exactly appear as one Hydrogen task. Neon appears only for hard tasks; Argon appears only if the Gemini pool is drained.
+- The scout checks (links, accessibility, leftover text) went to Flash (scouting only; Flash never builds), and Opus verified what they reported before anything was changed.
 - Every task that edits files got a reviewer sub-agent. Each task was reviewed ONCE, after all its mini-tasks finished, never per mini-task. `sonnet-reviewer` reviewed it with 400 changed lines or fewer (combined diff); `opus-reviewer` (a sub-agent) reviewed it above 400, and the main chat never read a full diff. No agy model reviewed anything.
-- A failed review of Hydrogen-built work went to Hydrogen high first (`<task>-r1`, with the whole task diff and defect list), then Argon medium (`-r2`), then Claude Sonnet medium (`claude-sonnet-fixer`), then Claude Opus medium, and `.claude/m10/fix-ladders.md` was read first. Drained steps were skipped.
-- If more than 1 in 3 Hydrogen-built tasks failed their first review (from the 3rd reviewed task on), the plan says the Hydrogen safety switch tripped and new tasks go to Argon medium, and `.m10/last-run.md` repeats it.
+- A failed review of Hydrogen-built work went to Hydrogen high first (`<task>-r1`, with the whole task diff and defect list), then Neon high (`-r2`), then Claude Sonnet medium (`claude-sonnet-fixer`), then Claude Opus medium, and `.claude/m10/fix-ladders.md` was read first. Drained steps were skipped.
+- If more than 1 in 3 Hydrogen-built tasks failed their first review (from the 3rd reviewed task on), the plan says the Hydrogen safety switch tripped and new tasks go to Neon high, and `.m10/last-run.md` repeats it.
 - The final message to the user is at most 8 short lines (what was built, what is open, who did the work, what you must decide, "Details: .m10/last-run.md") plus the "Elapsed: Xm Ys" line. The per-wave table is in `.m10/last-run.md`.
 
 ## Optional: test the drained pools
 
-Fake a drained Antigravity before you paste a prompt. In the project folder (Mac, or Git Bash on Windows). First only Hydrogen:
+Fake a drained Antigravity before you paste a prompt. In the project folder (Mac, or Git Bash on Windows). First the shared Gemini pool (Hydrogen, Neon, Flash):
 
 ```bash
 mkdir -p .claude/agy-quota
-printf 'until=2099-01-01T00:00:00Z\nreason=test\n' > .claude/agy-quota/gemini-4-hydrogen-high
+printf 'until=2099-01-01T00:00:00Z\nreason=test\n' > .claude/agy-quota/gemini-pool
 ```
 
-Paste Prompt A. `scripts/agy-run.sh --status` should list the marker. The plan still launches `--model hydrogen` (never `--model flash-high` directly; Flash is a fallback only); the report of each run shows `fallbacks: skipped: marker on gemini-4-hydrogen-high` and `model that ran: gemini-3.8-flash-high` for exact mini-tasks (Argon medium for bulk tasks). No question to you. A failed review should start at Argon medium (`-r2`).
+Paste Prompt A. `scripts/agy-run.sh --status` should list the marker `gemini-pool` (the shared marker covers Hydrogen, Neon and Flash). The plan still launches `--model hydrogen`; the report of each build run shows `fallbacks: skipped: marker on gemini-4-hydrogen-high` and `model that ran: gemini-4-argon-medium` (Argon, the fallback, then agy Sonnet if Argon is drained too). Neon and Flash are never tried as a fallback, and no question comes to you. A failed review should skip Hydrogen and Neon and start at Argon medium (`-r2`).
 
-Then drain all three build pools and paste Prompt A again:
+Then drain Argon and agy Sonnet as well and paste Prompt A again:
 
 ```bash
-for m in gemini-4-hydrogen-high gemini-3.8-flash-high gemini-4-argon-medium; do printf 'until=2099-01-01T00:00:00Z\nreason=test\n' > ".claude/agy-quota/$m"; done
+printf 'until=2099-01-01T00:00:00Z\nreason=test\n' | tee .claude/agy-quota/gemini-4-argon-medium .claude/agy-quota/claude-sonnet-5-5-medium > /dev/null
 ```
 
-`--status` should list three markers. The design shell still goes to a Claude builder. Opus should ask ONE question once everything else has run: "Antigravity is drained for Hydrogen, Argon and Flash. Wait for the reset, or switch to Claude only?". It must not pick for you. With Hydrogen and Argon drained, a failed Hydrogen-built task should start its fix at `claude-sonnet-fixer`. Delete the marker files when you are done: `rm .claude/agy-quota/*`.
+`--status` should list three markers. The design shell still goes to a Claude builder. Opus should ask ONE question once everything else has run: "Antigravity is drained for the Gemini models, Argon and Sonnet. Wait for the reset, or switch to Claude only?". It must not pick for you. With the Gemini pool and Argon drained, a failed Hydrogen-built task should start its fix at `claude-sonnet-fixer`. Delete the marker files when you are done: `rm .claude/agy-quota/*`.
