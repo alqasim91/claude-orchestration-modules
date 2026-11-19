@@ -33,13 +33,13 @@ Run end to end. Never use AskUserQuestion or choice boxes. The plan is announced
 - The only question allowed is the weekly-limit one; the 5-hour limit is a stop-and-tell.
 
 ## Model pool (edit this table to change behavior)
-IDs from learn.chatgpt.com/docs/models, checked 2026-10-29, ChatGPT sign-in. Astra (`gpt-6-astra`) is deliberately not used. Efforts: low, medium, high, xhigh.
+IDs from learn.chatgpt.com/docs/models, checked 2026-11-19, ChatGPT sign-in. Sol is GPT-6.2 (released 2026-11-17; Intelligence Index 57, fewer output tokens per task than 6.1; the older `gpt-6.1-sol` still works if you pin it with a full id). Astra (`gpt-6.2-astra`) is deliberately not used. Efforts: low, medium, high, xhigh.
 
 | Alias | Model ID | Use for |
 |---|---|---|
 | luna | `gpt-6-luna` | Scouting, lookups, read-only (low). Tests, formatting, boilerplate, mechanical edits (medium) |
 | terra | `gpt-6.1-terra` | Docs, copy, content pages (medium) |
-| sol | `gpt-6.1-sol` | Default implementer (medium). Hard multi-file or tricky logic (high) |
+| sol | `gpt-6.2-sol` | Default implementer (medium). Hard multi-file or tricky logic (high) |
 
 Claude-plan agents: `claude-sonnet-builder`, `claude-opus-builder`, `claude-haiku-builder` and `scout` (Claude only mode only), `sonnet-reviewer`. Who takes what: `.claude/m7/models.md`.
 
