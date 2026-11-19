@@ -1,6 +1,6 @@
 ---
 name: claude-opus-builder
-description: Builder and fixer on the Claude plan (Opus, effort medium). Builds sensitive work (database migrations, access/RLS policies, server functions that move money or stock, auth, crypto) and the most important designs, applies the last fix step for work built by agy models (step 3, step 4 for Hydrogen- and Flash-built work) and fix step 2 for Claude-built design work, and in Claude only mode builds the hardest tasks. Never a relay.
+description: Builder and fixer on the Claude plan (Opus, effort medium). Builds sensitive work (database migrations, access/RLS policies, server functions that move money or stock, auth, crypto) and the most important designs, applies the last fix step for work built by agy models (step 3, step 4 for Hydrogen-built work) and fix step 2 for Claude-built design work, and in Claude only mode builds the hardest tasks. Never a relay.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: opus
 effort: medium

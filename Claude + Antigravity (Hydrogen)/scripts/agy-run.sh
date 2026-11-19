@@ -4,33 +4,34 @@
 #
 # Usage:
 #   scripts/agy-run.sh --model <alias[-low|-medium|-high]> --task <slug> --owns "<comma list|none>" --brief <file> \
-#       [--exact] [--no-fallback] [--worktree <path>]
+#       [--no-fallback] [--worktree <path>]
 #   scripts/agy-run.sh --status
 # Examples:
-#   scripts/agy-run.sh --model hydrogen --exact --task w1-pages-m1 --owns "site/about.html" --brief .m10/briefs/w1-pages-m1.md
+#   scripts/agy-run.sh --model hydrogen --task w1-pages-m1 --owns "site/about.html" --brief .m10/briefs/w1-pages-m1.md
 #   scripts/agy-run.sh --model hydrogen --task w1-home --owns "site/index.html" --brief .m10/briefs/w1-home.md
 #   scripts/agy-run.sh --model hydrogen --no-fallback --task w1-home-r1 --owns "site/index.html" --brief .m10/briefs/w1-home-r1.md
-#   scripts/agy-run.sh --model argon-high --task w2-engine --owns "src/engine.js" --brief .m10/briefs/w2-engine.md
+#   scripts/agy-run.sh --model neon --task w2-engine --owns "src/engine.js" --brief .m10/briefs/w2-engine.md   (hard task)
 #   scripts/agy-run.sh --model flash --task s1-links --owns none --brief .m10/briefs/s1-links.md   (read-only scout)
-# --exact marks a build as an exact mini-task: only then may the chain use Flash high as a fallback.
+# --exact is still accepted but does nothing now (Flash no longer builds, so no chain depends on it).
 # The brief file is body-only (.m10/briefs/<task>.md). The script adds task:, owns:, "Read AGENTS.md first and
 # follow it.", the read-only line and the no-shell line. A design task must never be sent here (CLAUDE.md rule;
 # the script also refuses a brief whose first line is the bare word "design").
-# --model missing = hydrogen (the default builder, high effort). --task missing = a generated slug (said in the report). --owns missing = the run
-# goes ahead unscoped and the report says so (a Flash call without --owns is a read-only scout; a Flash build as first choice is refused).
-# Hydrogen = gemini-4-hydrogen-<low|medium|high|xhigh>. The alias `hydrogen` means high; `hydrogen-medium`,
-# `hydrogen-low`, `hydrogen-xhigh` pick another effort. Every other alias defaults to medium.
+# --model missing = hydrogen (the default builder, high effort). neon = hard tasks, default high effort. --task missing = a generated slug (said in the report). --owns missing = the run
+# goes ahead unscoped and the report says so (a Flash call without --owns is a read-only scout; Flash never builds).
+# Hydrogen = gemini-4-hydrogen-<low|medium|high|xhigh>, Neon = gemini-4-neon-<low|medium|high|xhigh>. The aliases `hydrogen` and
+# `neon` mean high; a suffix (`neon-xhigh`, `hydrogen-medium`) picks another effort. Every other alias defaults to medium.
 #
 # Exit codes:
 #   0 success (report printed)
 #   1 other error: login, crash, timeout, unknown flag (last 20 log lines printed). No fallback
-#   2 agy missing, bad arguments, refused (design, Flash fix, Flash build as first choice), or every model unavailable / not in `agy models`
+#   2 agy missing, bad arguments, refused (design, Flash fix, Flash build), or every model unavailable / not in `agy models`
 #   3 drained. First line "drained: <model-id>, no fallback" (--no-fallback) or
 #     "drained: all models drained or unavailable (tried: ...)" when the chain is used up, or
 #     "drained: max fallbacks reached ..." Owned files may be partly edited (the report shows them)
 #   4 suspected concurrency limit: first line "concurrency: <quoted text>". No marker, no fallback
 #
-# Markers: .claude/agy-quota/<model-id>, two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
+# Markers: .claude/agy-quota/<name>, two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
+# <name> is the model id (Argon, agy Sonnet/Opus) or `gemini-pool` (Hydrogen, Neon and Flash share one quota; see pool_of).
 # until = the reset time parsed from the output, else now + 6 hours (a guess: agy reset times are unpublished).
 # Legacy markers (one line, a bare ISO time) count as active for 6 hours from that time.
 # With --status: prints active markers and "agy: N models limited". Always exit 0.
@@ -67,17 +68,18 @@ CONC_RE='concurrent|too many sessions|another session|already running|locked'
 
 # ================= ALIASES, EFFORT SUFFIX, CHAINS (edit together with CLAUDE.md) =================
 # Alias -> agy model id. A -low / -medium / -high suffix on the alias picks the effort (default medium):
-#   hydrogen -> gemini-4-hydrogen-<effort> (default high; also xhigh)
+#   hydrogen -> gemini-4-hydrogen-<effort> (default high; also xhigh)   neon -> gemini-4-neon-<effort> (default high; also xhigh)
 #   argon -> gemini-4-argon-<effort>   sonnet -> claude-sonnet-5-5-<effort>   opus -> claude-opus-5-5-<effort>
-#   flash -> gemini-3.8-flash-<effort> (read-only scouting only; Flash builds only as the fallback gemini-3.8-flash-high, never a first choice)
-#   A -xhigh suffix exists for hydrogen only (other families: the id is checked against `agy models`).
+#   flash -> gemini-3.8-flash-<effort> (read-only scouting only; Flash never builds)
+#   A -xhigh suffix exists for hydrogen and neon only (other families: the id is checked against `agy models`).
 # A full model id is used as given (no chain, except that a known family id behaves like its alias).
 alias_family() {   # $1 alias word (no suffix); prints the family or returns 1
-  case "$1" in hydrogen|flash|argon|sonnet|opus) echo "$1" ;; *) return 1 ;; esac
+  case "$1" in hydrogen|neon|flash|argon|sonnet|opus) echo "$1" ;; *) return 1 ;; esac
 }
 family_id() {      # $1 family  $2 effort
   case "$1" in
     hydrogen) echo "gemini-4-hydrogen-$2" ;;
+    neon)   echo "gemini-4-neon-$2" ;;
     flash)  echo "gemini-3.8-flash-$2" ;;
     argon)  echo "gemini-4-argon-$2" ;;
     sonnet) echo "claude-sonnet-5-5-$2" ;;
@@ -85,20 +87,19 @@ family_id() {      # $1 family  $2 effort
   esac
 }
 # Fallback chain after the first choice, builders only. Tokens are alias[-effort]. Never a Claude (non-agy) model.
-#   hydrogen (exact mini-task, --exact) -> flash-high -> argon.   hydrogen (not exact) -> argon -> sonnet.
-#   hydrogen (read-only) -> argon.   Flash is never a fallback for work that is not an exact mini-task.
+#   hydrogen -> argon -> sonnet.   neon -> argon -> sonnet.   (read-only: hydrogen or neon -> argon.)
+#   Neon and Flash are NOT in a Hydrogen chain, and Hydrogen and Flash are NOT in a Neon chain: all three share one quota,
+#   so when one is drained the others are too. Argon (own weekly limit) is the fallback of the Gemini pool.
 #   argon -> sonnet -> opus.  sonnet -> argon -> opus.  opus -> sonnet -> argon-high.
-#   A read-only Flash scout: flash -> argon-low -> stop.  A Flash build as first choice is refused (exit 2); flash-high is reached only through hydrogen --exact.
-# Argon high is never in a chain after Hydrogen or Flash.
-chain_after() {    # $1 family  $2 readonly(0|1)  $3 exact(0|1)
-  case "$1:$2:$3" in
-    hydrogen:1:*) echo "argon" ;;
-    hydrogen:0:1) echo "flash-high argon" ;;
-    hydrogen:0:*) echo "argon sonnet" ;;
+#   A read-only Flash scout: flash -> argon-low -> stop.  A Flash build is refused (exit 2).
+chain_after() {    # $1 family  $2 readonly(0|1)  $3 exact(0|1, unused)
+  case "$1:$2" in
+    hydrogen:1|neon:1) echo "argon" ;;
+    hydrogen:0|neon:0) echo "argon sonnet" ;;
     argon:*)      echo "sonnet opus" ;;
     sonnet:*)     echo "argon opus" ;;
     opus:*)       echo "sonnet argon-high" ;;
-    flash:1:*)    echo "argon-low" ;;
+    flash:1)      echo "argon-low" ;;
     *)            echo "" ;;
   esac
 }
@@ -138,6 +139,18 @@ marker_until() {    # prints the until time (UTC ISO) if the model's marker is a
   return 0
 }
 
+# Gemini quota pool: Hydrogen, Neon and Flash share ONE quota (weekly + 5-hour limits; confirmed from the user's
+# Antigravity usage screen, 2026-11-19). When one of them is drained, all are. The pool has ONE marker, `gemini-pool`.
+# Argon has its own separate weekly limit, so it keeps its own per-model marker. agy Sonnet/Opus (Claude and GPT pool) too.
+pool_of() { case "$1" in gemini-4-hydrogen-*|gemini-4-neon-*|gemini-3.8-flash-*) echo gemini-pool ;; esac; }
+drain_until() {     # $1 model id: prints the until time if the model OR its pool has an active marker
+  local u p
+  u=$(marker_until "$1")
+  if [ -z "$u" ]; then p=$(pool_of "$1"); [ -n "$p" ] && u=$(marker_until "$p"); fi
+  [ -n "$u" ] && echo "$u"
+  return 0
+}
+
 if [ "${1:-}" = "--status" ]; then
   mkdir -p "$QDIR"
   n=0; now=$(date +%s)
@@ -171,7 +184,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$BRIEF" ] \
-  || die "usage: agy-run.sh --model <alias> --task <slug> --owns \"<list|none>\" --brief <file> [--exact] [--no-fallback] [--worktree <path>] | --status"
+  || die "usage: agy-run.sh --model <alias> --task <slug> --owns \"<list|none>\" --brief <file> [--no-fallback] [--worktree <path>] | --status"
 [ -f "$BRIEF" ] || die "brief not found: $BRIEF"
 NOTES=""   # extra report lines (defaults applied, forced settings)
 note() { NOTES="${NOTES}$*"$'\n'; }
@@ -194,13 +207,14 @@ case "$_a" in
   *-high)   _e=high;   _a="${_a%-high}" ;;
 esac
 if FAMILY=$(alias_family "$_a"); then
-  _d=medium; [ "$FAMILY" = "hydrogen" ] && _d=high       # the alias `hydrogen` means high
+  _d=medium; { [ "$FAMILY" = "hydrogen" ] || [ "$FAMILY" = "neon" ]; } && _d=high   # `hydrogen` and `neon` mean high
   EFFORT="${_e:-$_d}"
   ID=$(family_id "$FAMILY" "$EFFORT")
 else
   FAMILY=""; ID="$MODEL"             # full id, used as given
   case "$ID" in
     gemini-4-hydrogen-*)   FAMILY=hydrogen; EFFORT="${ID##*-}" ;;
+    gemini-4-neon-*)       FAMILY=neon;   EFFORT="${ID##*-}" ;;
     gemini-3.8-flash-*)    FAMILY=flash;  EFFORT="${ID##*-}" ;;
     gemini-4-argon-*)      FAMILY=argon;  EFFORT="${ID##*-}" ;;
     claude-sonnet-5-5-*)   FAMILY=sonnet; EFFORT="${ID##*-}" ;;
@@ -231,15 +245,15 @@ if [ "$FAMILY" = "flash" ]; then
   # Flash never fixes or reviews.
   if [[ "$TASK" =~ -r[1-9]$ ]]; then die "refused: Flash never fixes or reviews (slug $TASK looks like a fix round)"; fi
   if [ $READONLY -eq 0 ]; then
-    # Flash builds only as the fallback of hydrogen --exact (chain_after), never as a first choice.
-    die "refused: Flash builds only as the fallback of --model hydrogen --exact (use --owns none for a read-only Flash scout)"
+    # Flash shares the Hydrogen quota, so it is no fallback builder. Flash only scouts.
+    die "refused: Flash never builds (use --owns none for a read-only Flash scout, --model hydrogen for builds)"
   fi
 fi
 # A fix round (slug ends in -r1..-r9) never falls back: no other agy model (Flash included) may serve a fix.
 if [[ "$TASK" =~ -r[1-9]$ ]] && [ $NOFB -eq 0 ]; then
   NOFB=1; note "fix task ($TASK): --no-fallback forced, no other model may serve a fix"
 fi
-if [ $EXACT -eq 1 ] && [ "$FAMILY" != "hydrogen" ]; then note "--exact only matters for hydrogen builds: ignored"; fi
+if [ $EXACT -eq 1 ]; then note "--exact has no effect any more: ignored"; fi
 
 # ---- Preflight ----
 command -v "$AGY_BIN" >/dev/null 2>&1 || die "agy not installed"
@@ -293,11 +307,21 @@ build_brief() {
   } > "$BRIEF_OUT"
 }
 
-write_marker() {   # $1 model id  $2 until epoch  $3 reason. Atomic: temp file in the same dir, then mv
+write_marker() {   # $1 marker name  $2 until epoch  $3 reason. Atomic: temp file in the same dir, then mv
   local t
   t=$(mktemp "$QDIR/.tmp.XXXXXX")
   { echo "until=$(to_iso "$2")"; echo "reason=$3"; } > "$t"
   mv -f "$t" "$QDIR/$1"
+}
+write_marker_for() {   # $1 model id  $2 until epoch  $3 reason: pool models write the shared pool marker
+  local p
+  p=$(pool_of "$1")
+  # "not available to ..." means this ONE model is not on the plan: that is not a drained pool
+  if [ -n "$p" ] && ! printf '%s' "$3" | grep -Eiq 'not available'; then
+    write_marker "$p" "$2" "$1: $3"
+  else
+    write_marker "$1" "$2" "$3"
+  fi
 }
 
 # parse_reset <logfile>: prints a reset time as epoch seconds, or nothing. Best effort.
@@ -387,7 +411,7 @@ while [ $idx -lt $total ]; do
     if [ $NOFB -eq 1 ]; then die "unavailable: $MODEL ($cid not in agy models), no fallback"; fi
     reason="unavailable: $cid not in agy models"
   else
-    u=$(marker_until "$cid")
+    u=$(drain_until "$cid")
     if [ -n "$u" ]; then
       unavailable_only=0
       if [ $NOFB -eq 1 ]; then
@@ -450,7 +474,7 @@ while [ $idx -lt $total ]; do
       now=$(date +%s)
       reset=$(parse_reset "$LOG")
       until_e=$((now + LIMIT_DEFAULT)); [ -n "$reset" ] && until_e=$reset   # 6h default is a guess
-      write_marker "$cid" "$until_e" "$qline"
+      write_marker_for "$cid" "$until_e" "$qline"
       if [ $NOFB -eq 1 ]; then
         echo "drained: $cid, no fallback"
         echo "until: $(to_iso "$until_e")"
