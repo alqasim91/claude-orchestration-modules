@@ -1,6 +1,6 @@
 ---
 name: claude-sonnet-fixer
-description: Fixer on the Claude plan (Sonnet, effort medium). Applies a defect list to work that Hydrogen built (fix step 3 of that ladder, after Hydrogen high and Neon high; earlier when those are drained or skipped). Fixes only; never builds new work and never a relay.
+description: Fixer on the Claude plan (Sonnet, effort medium). Applies a defect list to work that Hydrogen built (fix step 4 of that ladder, after Hydrogen high, Neon high and Carbon high; earlier when those are drained or skipped). Fixes only; never builds new work and never a relay.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 effort: medium

@@ -19,9 +19,9 @@
 #   neon-xhigh  -> gemini-4-neon-xhigh       the hardest tasks, heaviest effort
 #   neon-medium -> gemini-4-neon-medium      hard tasks, lighter effort
 #   neon-low    -> gemini-4-neon-low         trivial work
-#   argon      -> gemini-4-argon-medium      FALLBACK builder: last resort for builds, hard tasks when the Gemini pool is drained, fix steps
-#   argon-high -> gemini-4-argon-high        the hardest tasks when the Gemini pool is drained
-#   argon-low  -> gemini-4-argon-low         trivial work
+#   carbon      -> gemini-4-carbon-high      ESCALATION after Neon fails review, long-horizon hard reasoning. ~2x slower, heavy quota: sparingly. --owns none is refused
+#   carbon-high -> gemini-4-carbon-high      same as carbon
+#   carbon-medium -> gemini-4-carbon-medium  lighter effort. There is NO carbon-low (costs more per task) and NO carbon-xhigh
 #   sonnet     -> claude-sonnet-5-5-medium   fix tasks only: slug ends in -r1..-r5 and --owns is not none
 #   opus       -> claude-opus-5-5-medium     fix tasks only: same rule
 # One model per call. There is no chain walk: the main session re-routes.
@@ -37,7 +37,7 @@
 #
 # Markers: .claude/agy-quota/<name>, two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
 # until = the reset time parsed from the output, else now + 6 hours (a guess: agy reset times are unpublished).
-# <name> is the model id (Argon, agy Sonnet/Opus) or `gemini-pool` (Hydrogen, Neon and Flash share one quota; see pool_of).
+# <name> is the model id (agy Sonnet/Opus, or a Gemini model "not available to" the plan) or `gemini-pool` (ALL Gemini models share one quota; see pool_of).
 # Legacy markers (one line, a bare ISO time) count as active for 6 hours from that time.
 # With --status: prints active markers and "agy: N models limited". Always exit 0.
 #
@@ -79,9 +79,8 @@ alias_id() {   # prints the agy model id for an alias, or returns 1
     neon-low)    echo "gemini-4-neon-low" ;;
     flash)      echo "gemini-3.8-flash-medium" ;;
     flash-low)  echo "gemini-3.8-flash-low" ;;
-    argon)      echo "gemini-4-argon-medium" ;;
-    argon-high) echo "gemini-4-argon-high" ;;
-    argon-low)  echo "gemini-4-argon-low" ;;
+    carbon|carbon-high) echo "gemini-4-carbon-high" ;;
+    carbon-medium) echo "gemini-4-carbon-medium" ;;
     sonnet)     echo "claude-sonnet-5-5-medium" ;;
     opus)       echo "claude-opus-5-5-medium" ;;
     *) return 1 ;;
@@ -122,10 +121,10 @@ marker_until() {    # prints the until time (UTC ISO) if the model's marker is a
   return 0
 }
 
-# Gemini quota pool: Hydrogen, Neon and Flash share ONE quota (weekly + 5-hour limits; confirmed from the user's
-# Antigravity usage screen, 2026-11-19). When one of them is drained, all are. The pool has ONE marker, `gemini-pool`.
-# Argon has its own separate weekly limit, so it keeps its own per-model marker. agy Sonnet/Opus (Claude and GPT pool) too.
-pool_of() { case "$1" in gemini-4-hydrogen-*|gemini-4-neon-*|gemini-3.8-flash-*) echo gemini-pool ;; esac; }
+# Gemini quota pool: ALL Gemini models (Neon, Carbon, Hydrogen, Flash) share ONE quota (weekly + 5-hour limits; user decision
+# 2026-11-24). When one of them is drained, all are. The pool has ONE marker, `gemini-pool`.
+# agy Sonnet/Opus (Claude and GPT pool) are a separate pool with a per-model marker.
+pool_of() { case "$1" in gemini-*) echo gemini-pool ;; esac; }
 drain_until() {     # $1 model id: prints the until time if the model OR its pool has an active marker
   local u p
   u=$(marker_until "$1")
@@ -187,7 +186,7 @@ ID=$(alias_id "$MODEL") || die "refused: model not allowed in this module ($MODE
 case "$MODEL" in
   hydrogen|hydrogen-*)
     [ $READONLY -eq 0 ] || die "refused: $MODEL builds need a real --owns list (use OpenCode scout or flash for read-only scouting)" ;;
-  neon|neon-*)
+  neon|neon-*|carbon|carbon-*)
     [ $READONLY -eq 0 ] || die "refused: $MODEL builds need a real --owns list (use OpenCode scout or flash for read-only scouting)" ;;
   flash|flash-low)
     [ $READONLY -eq 1 ] || die "refused: $MODEL is read-only scouting, --owns must be none (Flash never builds)"

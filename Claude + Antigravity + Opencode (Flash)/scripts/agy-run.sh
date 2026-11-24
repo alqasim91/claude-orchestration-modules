@@ -10,10 +10,14 @@
 #   flash-high -> gemini-3.8-flash-high      builds. --owns none is refused
 #   flash      -> gemini-3.8-flash-medium    read-only scouting. --owns must be none
 #   flash-low  -> gemini-3.8-flash-low       read-only lookups. --owns must be none
-#   argon      -> gemini-4-argon-medium      hard builds and fixes
-#   argon-high -> gemini-4-argon-high        the hardest builds
-#   argon-low  -> gemini-4-argon-low         trivial work
-#   sonnet     -> claude-sonnet-5-5-medium   fix tasks only: slug ends in -r1..-r4 and --owns is not none
+#   neon       -> gemini-4-neon-high         hard builds and fixes (default effort)
+#   neon-xhigh -> gemini-4-neon-xhigh        the hardest builds only
+#   neon-medium-> gemini-4-neon-medium       smaller hard tasks and fixes
+#   neon-low   -> gemini-4-neon-low          trivial work
+#   carbon     -> gemini-4-carbon-high       escalation after Neon fails review, long-horizon hard reasoning.
+#                                            Slow (~2x) and heavy on quota: sparingly
+#   carbon-medium -> gemini-4-carbon-medium  (there is NO carbon-low and NO carbon-xhigh: refused)
+#   sonnet     -> claude-sonnet-5-5-medium   fix tasks only: slug ends in -r1..-r5 and --owns is not none
 #   opus       -> claude-opus-5-5-medium     fix tasks only: same rule
 # One model per call. There is no chain walk: the main session re-routes.
 #
@@ -25,7 +29,11 @@
 #     (owned files may be partly edited)
 #   4 suspected concurrency limit: first line "concurrency: <quoted text>". No marker is written
 #
-# Markers: .claude/agy-quota/<model-id>, two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
+# Quota pools: ALL gemini-* models (Flash, Neon, Carbon) share ONE pool, so they share ONE marker:
+# .claude/agy-quota/gemini-pool. claude-* models (agy Sonnet, agy Opus) keep their own marker per model id.
+# A "not available to" error is about one model, not the pool: it marks only that model id.
+# A gemini model is drained when gemini-pool OR its own id marker is active (own-id markers: legacy and not-available).
+# Markers: .claude/agy-quota/<key>, two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
 # until = the reset time parsed from the output, else now + 6 hours (a guess: agy reset times are unpublished).
 # Legacy markers (one line, a bare ISO time) count as active for 6 hours from that time.
 # With --status: prints active markers and "agy: N models limited". Always exit 0.
@@ -61,13 +69,20 @@ alias_id() {   # prints the agy model id for an alias, or returns 1
     flash-high) echo "gemini-3.8-flash-high" ;;
     flash)      echo "gemini-3.8-flash-medium" ;;
     flash-low)  echo "gemini-3.8-flash-low" ;;
-    argon)      echo "gemini-4-argon-medium" ;;
-    argon-high) echo "gemini-4-argon-high" ;;
-    argon-low)  echo "gemini-4-argon-low" ;;
+    neon)       echo "gemini-4-neon-high" ;;
+    neon-xhigh) echo "gemini-4-neon-xhigh" ;;
+    neon-medium) echo "gemini-4-neon-medium" ;;
+    neon-low)   echo "gemini-4-neon-low" ;;
+    carbon)     echo "gemini-4-carbon-high" ;;
+    carbon-medium) echo "gemini-4-carbon-medium" ;;
     sonnet)     echo "claude-sonnet-5-5-medium" ;;
     opus)       echo "claude-opus-5-5-medium" ;;
     *) return 1 ;;
   esac
+}
+
+pool_key() {   # marker key of the shared quota pool for a model id (all gemini-* share one)
+  case "$1" in gemini-*) echo "gemini-pool" ;; *) echo "$1" ;; esac
 }
 
 die() { echo "$*" >&2; exit "${2:-2}"; }
@@ -102,6 +117,12 @@ marker_until() {    # prints the until time (UTC ISO) if the model's marker is a
   [[ "$e" =~ ^[0-9]+$ ]] || return 0
   [ "$(date +%s)" -lt "$e" ] && echo "$u"
   return 0
+}
+drained_until() {   # $1 model id: active pool marker, else active own-id marker (not-available / legacy); prints until
+  local u
+  u=$(marker_until "$(pool_key "$1")")
+  [ -n "$u" ] || u=$(marker_until "$1")
+  echo "$u"
 }
 
 if [ "${1:-}" = "--status" ]; then
@@ -160,7 +181,7 @@ case "$MODEL" in
   flash|flash-low)
     [ $READONLY -eq 1 ] || die "refused: $MODEL is read-only scouting, --owns must be none" ;;
   sonnet|opus)
-    if [ $READONLY -eq 1 ] || ! [[ "$TASK" =~ -r[1-4]$ ]]; then die "refused: sonnet/opus are fix-only (slug ends in -r1..-r4, owns is not none)"; fi ;;
+    if [ $READONLY -eq 1 ] || ! [[ "$TASK" =~ -r[1-5]$ ]]; then die "refused: sonnet/opus are fix-only (slug ends in -r1..-r5, owns is not none)"; fi ;;
 esac
 
 # ---- Preflight ----
@@ -180,7 +201,7 @@ if [[ "$RUN_TIMEOUT" =~ ^[0-9]+$ ]] && [ "$RUN_TIMEOUT" -gt 0 ]; then
 fi
 
 # ---- Marker check: a drained model is not run ----
-u=$(marker_until "$ID")
+u=$(drained_until "$ID")
 if [ -n "$u" ]; then
   echo "drained: $ID until $u (marker)"
   exit 3
@@ -324,7 +345,10 @@ if [ $limited -eq 1 ]; then
   now=$(date +%s)
   reset=$(parse_reset "$LOG")
   until_e=$((now + LIMIT_DEFAULT)); [ -n "$reset" ] && until_e=$reset   # 6h default is a guess
-  write_marker "$ID" "$until_e" "$qline"
+  mkey=$(pool_key "$ID")
+  # "not available" is a per-model error, not a pool drain: mark only this model id
+  if printf '%s' "$qline" | grep -Eiq 'not available'; then mkey="$ID"; fi
+  write_marker "$mkey" "$until_e" "$qline"
   echo "drained: $ID until $(to_iso "$until_e")"
   report "none (drained)"
   exit 3

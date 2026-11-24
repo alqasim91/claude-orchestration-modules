@@ -1,7 +1,9 @@
-# Claude + Antigravity (Flash): Flash builds the small pieces, Argon builds the rest
+# Claude + Antigravity (Flash): Flash builds the small pieces, Neon builds the rest
 
-**How this differs from plain Claude + Antigravity (Argon):** Gemini Flash (high) builds first. Any task that splits into small, exact pieces goes to Flash, which saves the small Argon pool. Argon then builds only what can't be spelled out exactly, and it fixes Flash's work when a review fails.
-Not sure which Claude + Antigravity setup to use? Pick this one if your Argon pool runs out fast. Pick plain Claude + Antigravity (Argon) if you want Argon to do most of the building.
+**How this differs from the other Claude + Antigravity setups:** Gemini Flash (high) builds first. Any task that splits into small, exact pieces goes to Flash, which spares the costlier Gemini 4 models. Gemini 4 Neon then builds only what can't be spelled out exactly, and it fixes Flash's work when a review fails. Gemini 4 Carbon is the escalation step when Neon's fix fails.
+Not sure which Claude + Antigravity setup to use? Pick this one if your Gemini quota runs out fast. Pick a setup where Neon builds everything if you want the strongest model on every task.
+
+**One Gemini quota.** Every Gemini model in Antigravity (Flash, Neon, Carbon) draws on ONE shared quota. Claude and GPT models in `agy` (Sonnet, Opus) are a separate pool. So when Gemini runs dry, no other Gemini model can take over.
 
 Claude Opus is the boss. It splits your request into tasks, and each task into small mini-tasks when it can write an exact spec for every piece. Builds go out through the Antigravity CLI (`agy`), straight from a script (`scripts/agy-run.sh`) with no helper agent in between, and run at the same time. Launching an Antigravity model costs no Claude usage. Design, reviews and the later fix steps stay on your Claude plan.
 
@@ -38,9 +40,10 @@ agy
 ```
 agy models
 ```
-Make sure these five are in the list:
+Make sure these six are in the list:
 - `gemini-3.8-flash-high`
-- `gemini-4-argon-medium`
+- `gemini-4-neon-high`
+- `gemini-4-carbon-high`
 - `gemini-3.8-flash-medium`
 - `claude-sonnet-5-5-medium`
 - `claude-opus-5-5-medium`
@@ -146,14 +149,15 @@ The installer adds an allow-list to `.claude/settings.json`: the runner script, 
 | Who | Role |
 |---|---|
 | **Opus** (your Claude session) | The boss. Only plans and judges: launches sub-agents, reads their short reports, and never edits files, runs builds or reads a full diff. |
-| **Flash high** (`gemini-3.8-flash-high`) | The first-choice builder. Gets small mini-tasks with an exact spec (files, names, markup, a check to run). Nearly unlimited. Never fixes or reviews. |
-| **Argon** (`gemini-4-argon-medium`) | Builds what Opus can't spec exactly (medium; high only for hard tasks). Also the first fixer of Flash's work. Small pool. |
+| **Flash high** (`gemini-3.8-flash-high`) | The first-choice builder. Gets small mini-tasks with an exact spec (files, names, markup, a check to run). Light on the shared Gemini quota. Never fixes or reviews. |
+| **Neon** (`gemini-4-neon-high`) | Builds what Opus can't spec exactly (high by default; `xhigh` only for the hardest tasks). Also the first fixer of Flash's work. Shares the Gemini quota with Flash and Carbon. |
+| **Carbon** (`gemini-4-carbon-high`; also `-medium`, never low or xhigh) | The escalation step when Neon's fix fails review, and for tasks that need long-horizon hard reasoning. About 2x slower than Neon and it burns the shared quota faster: used sparingly. |
 | **Sonnet / Opus via agy** | Specialists for non-design builds. Sonnet for careful edits and docs. Opus for hard multi-file work. Small pools. |
-| **Flash scout** (`gemini-3.8-flash-medium`) | Read-only: lookups, summaries, checks. Nearly unlimited. |
+| **Flash scout** (`gemini-3.8-flash-medium`) | Read-only: lookups, summaries, checks. Light on the shared Gemini quota. |
 | **`scripts/agy-run.sh`** | The runner script. Sends one task or mini-task to one Antigravity model, follows the fallback chain, and reports what changed. It refuses design. |
-| **`claude-sonnet-builder`** | Design shells and first drafts (Sonnet high). Fix step 2 for work Argon, agy Sonnet or agy Opus built. |
-| **`claude-opus-builder`** | Sensitive work (migrations, access policies, money and stock functions, auth, crypto) and the most important designs (Opus medium). Fix step 3 for agy-built and Flash-built work. |
-| **`claude-sonnet-fixer`** | Fix step 2 for Flash-built work (Sonnet medium), step 1 if Argon is drained. Fixes only. |
+| **`claude-sonnet-builder`** | Design shells and first drafts (Sonnet high). Fix step 2 for work agy Sonnet or agy Opus built, step 3 for Neon-built work, step 1 for Carbon-built work. |
+| **`claude-opus-builder`** | Sensitive work (migrations, access policies, money and stock functions, auth, crypto) and the most important designs (Opus medium). Last fix step for agy-built, Neon-built and Flash-built work. |
+| **`claude-sonnet-fixer`** | Fix step 3 for Flash-built work (Sonnet medium), the first step if the Gemini pool is drained. Fixes only. |
 | **`sonnet-reviewer`** | Reads one task's diff of 400 changed lines or fewer. Returns PASS or FAIL. |
 | **`opus-reviewer`** | Reads one task's diff of more than 400 changed lines (Opus medium). Returns PASS or FAIL. |
 | **`claude-haiku-builder`** | Tiny, exactly described edits. In Claude only mode: easy builds. |
@@ -168,7 +172,7 @@ Everything in the Claude rows runs on your Claude plan. No Antigravity model eve
  2 WAVE 0      design shell alone, built by Claude (Sonnet high or Opus medium)
       |
  3 WAVE 1+     tasks run in parallel: Flash-high mini-tasks when Opus can spec them
-               exactly, Argon when it can't. One owner per file
+               exactly, Neon when it can't. One owner per file
       |
  4 SCOUTS      Flash checks links, leftovers, accessibility
       |
@@ -176,11 +180,11 @@ Everything in the Claude rows runs on your Claude plan. No Antigravity model eve
                an Opus reviewer reads big ones; defects go back for fixing
 ```
 - **One owner per file.** Two tasks never touch the same file in a wave. Mini-tasks on the same file run one after another.
-- **Flash first.** While planning, Opus checks every non-design build task: can I write an exact spec for each small piece? Yes (4 mini-tasks by default, more if needed) means Flash high, with no question to you. No means Argon.
+- **Flash first.** While planning, Opus checks every non-design build task: can I write an exact spec for each small piece? Yes (4 mini-tasks by default, more if needed) means Flash high, with no question to you. No means Neon (high; Carbon high only for long-horizon hard reasoning).
 - **Waves.** Each wave is reviewed fully before the next one starts.
 - **Sensitive files go to `claude-opus-builder`** (Opus medium, on your Claude plan): database migrations, access policies, functions that move money or stock, auth and crypto. It is judged by layer: the screens, types and labels of the same feature are ordinary builds.
 - **Tiny edits go to `claude-haiku-builder` (or Flash, when the edit can be specced exactly).** Opus itself never edits, not even a one-liner. Unclear specs and architecture choices: Opus decides them in the plan, then delegates.
-- **Design never goes to Antigravity** (not Flash, not Argon). Shells and first design drafts always go to a Claude builder.
+- **Design never goes to Antigravity** (not Flash, Neon or Carbon). Shells and first design drafts always go to a Claude builder.
 
 ## Who reviews
 Opus counts the changed lines of the task (added plus removed, plus new files). A task built from mini-tasks is reviewed ONCE, after all its mini-tasks finish, on the combined diff, never per mini-task.
@@ -193,28 +197,31 @@ Opus counts the changed lines of the task (added plus removed, plus new files). 
 Same rule for every builder, `claude-opus-builder` included. The main chat never reads the full diff, only the verdict. Flash never reviews. If a fix pushes a task over 400, the next review moves up to `opus-reviewer`.
 
 ## When a review fails
-Up to 3 steps. Who fixes depends on who built it.
+Up to 4 steps. Who fixes depends on who built it.
 
-| Built by | Step 1 | Step 2 | Step 3 |
-|---|---|---|---|
-| Flash | Argon medium (`gemini-4-argon-medium`) | `claude-sonnet-fixer` (Sonnet medium) | `claude-opus-builder` (Opus medium) |
-| Argon, agy Sonnet or agy Opus | the same model | `claude-sonnet-builder` (Sonnet high) | `claude-opus-builder` (Opus medium) |
-| `claude-sonnet-builder` (design) | the same agent | `claude-opus-builder` | record and continue |
-| `claude-opus-builder` (design or sensitive) | the same agent | record and continue | - |
-| `claude-haiku-builder` (tiny edit) | the same agent | `claude-sonnet-builder` | `claude-opus-builder` |
+| Built by | Step 1 | Step 2 | Step 3 | Step 4 |
+|---|---|---|---|---|
+| Flash | Neon high (`gemini-4-neon-high`) | Carbon high (`gemini-4-carbon-high`) | `claude-sonnet-fixer` (Sonnet medium) | `claude-opus-builder` (Opus medium) |
+| Neon | Neon again | Carbon high | `claude-sonnet-builder` (Sonnet high) | `claude-opus-builder` (Opus medium) |
+| Carbon | `claude-sonnet-builder` (Sonnet high) | `claude-opus-builder` (Opus medium) | record and continue | - |
+| agy Sonnet or agy Opus | the same model | `claude-sonnet-builder` (Sonnet high) | `claude-opus-builder` (Opus medium) | - |
+| `claude-sonnet-builder` (design) | the same agent | `claude-opus-builder` | record and continue | - |
+| `claude-opus-builder` (design or sensitive) | the same agent | record and continue | - | - |
+| `claude-haiku-builder` (tiny edit) | the same agent | `claude-sonnet-builder` | `claude-opus-builder` | - |
 
-- Original Antigravity model drained (for Flash-built work: Argon drained)? Skip straight to the Claude steps.
-- Flash never fixes and never reviews. Argon gets the whole task's diff and the defect list, and fixes the whole task.
+- Gemini quota drained? Flash, Neon and Carbon are all drained together, so skip straight to the Claude steps. No other Gemini model takes over.
+- Flash never fixes and never reviews. Neon and Carbon get the whole task's diff and the defect list, and fix the whole task.
+- Carbon only ever runs as `carbon-high` (or `-medium`). Never `carbon-low`: it costs more per task than the higher efforts.
 - Still failing after the last step? It goes in the final summary and the build keeps going.
 
 ## The Flash safety switch
-Opus keeps score. From the 3rd reviewed Flash-built task on, if more than 1 in 3 failed their first review, Opus stops sending new tasks to Flash for the rest of that run. Those tasks go to Argon instead, and Opus says so in the plan and the final summary.
+Opus keeps score. From the 3rd reviewed Flash-built task on, if more than 1 in 3 failed their first review, Opus stops sending new tasks to Flash for the rest of that run. Those tasks go to Neon high instead, and Opus says so in the plan and the final summary.
 
 ## When quota runs out
-- A drained model gets a marker file in `.claude/agy-quota/` with a reset time. If agy gives none, the script uses 6 hours from now (a guess). Opus skips it until then. Check with `scripts/agy-run.sh --status`. Delete a marker to clear it.
-- A non-Flash build moves to the next Antigravity builder, by itself in the script: Argon, then Sonnet, then Opus.
-- **Argon, Sonnet and Opus all drained?** Flash keeps building everything that can be split into exact mini-tasks. Tasks that can't be split are held, and Opus asks you ONE question: **"wait for the reset, or switch to Claude only?"** It never switches on its own.
-- **Flash drained on a build?** Opus stops and asks: **"Flash is drained. Wait for the reset, or switch to Claude only?"**
+- A drained pool gets a marker file in `.claude/agy-quota/` with a reset time: `gemini-pool` (Flash, Neon and Carbon together) or `claude-pool` (agy Sonnet and Opus). A "not available" error marks only that one model, by its id. If agy gives no reset time, the script uses 6 hours from now (a guess). Opus skips it until then. Check with `scripts/agy-run.sh --status`. Delete a marker to clear it.
+- A Neon or Carbon build moves to agy Sonnet, then agy Opus, by itself in the script (there is no Gemini fallback: the Gemini quota is shared). An agy Sonnet build moves to Neon, then Opus.
+- **Gemini and agy Claude pools both drained?** Tasks that need either are held, and Opus asks you ONE question: **"wait for the reset, or switch to Claude only?"** It never switches on its own. Only the agy Claude pool drained: Flash and Neon keep building as usual.
+- **Flash drained on a build** (the whole Gemini quota is)? Opus stops and asks: **"Flash is drained. Wait for the reset, or switch to Claude only?"**
 - **Claude only mode.** Claude builds the rest, with no Antigravity. Opus scores each task, then picks `claude-haiku-builder` (easy), `claude-sonnet-builder` (normal and design) or `claude-opus-builder` (hardest). Read-only work goes to `scout`. Reviews use the same 400-line rule.
 
 # Part 3: Good to know
@@ -226,8 +233,8 @@ Opus keeps score. From the 3rd reviewed Flash-built task on, if more than 1 in 3
 - **Rule files.** Rarely needed rules live in `.claude/m6/`. Opus reads them only when needed, which keeps every message cheaper.
 - **agy runs have no shell.** Headless `agy` (`--mode accept-edits`) edits files but denies shell commands, so the models can't run tests. The reviewer runs the safe, read-only checks.
 - **Parallel runs drain quota faster.** Several models spend your Google quota at once. Prefer fewer, bigger tasks.
-- **Default caps:** 4 tasks total (argon 2, flash 3, agy sonnet 1, agy opus 1). Claude subagent runs count toward the total only. Edit the caps table in `CLAUDE.md`.
-- **Flash high saves Argon.** Most of the building runs on the nearly unlimited Flash pool. Argon spends quota only on tasks that can't be split and on fixing Flash's mistakes.
+- **Default caps:** 4 tasks total (neon 2, carbon 1, flash 3, agy sonnet 1, agy opus 1). Claude subagent runs count toward the total only. Edit the caps table in `CLAUDE.md`.
+- **Flash high spares Neon and Carbon.** Most of the building runs on Flash, which draws less of the shared Gemini quota per task. Neon spends quota only on tasks that can't be split and on fixing Flash's mistakes; Carbon (about $7.76 per task against Neon's $3.74, and about 2x slower, on Artificial Analysis Nov 2026 numbers) only when Neon's fix failed or the task needs long-horizon hard reasoning.
 - **Design, sensitive builds, reviews and the Sonnet and Opus fix steps use your Claude plan**, not Google quota. Watch your Claude usage too.
 - **Review every diff.** File ownership is enforced by instructions, not the filesystem. Fallbacks can switch models mid-task.
 - **Unverified:** whether `agy` allows concurrent sessions, the real quota error text, whether the `effort` setting in the Claude agent files is honored, and whether the script flow works on Windows (the script is a bash script, so it likely needs Git Bash). The script was tested against a stand-in `agy`, not the real tool.

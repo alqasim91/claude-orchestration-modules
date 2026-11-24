@@ -1,6 +1,6 @@
 @AGENTS.md
 
-# Orchestration (Claude + Antigravity (Flash): Claude plans in waves, Flash high builds small exact pieces, Argon builds the rest and fixes Flash's work, the Claude plan designs, reviews and fixes)
+# Orchestration (Claude + Antigravity (Flash): Claude plans in waves, Flash high builds small exact pieces, Neon builds the rest and fixes Flash's work, Carbon escalates, the Claude plan designs, reviews and fixes)
 
 ## Hard rule: the main session never implements
 Claude (Opus, this session) is the planner and the judge, never the builder. The main chat's context must stay short, so **even work that needs Opus itself runs in a sub-agent** (`claude-opus-builder`). No exceptions: not for small jobs, sensitive work, or finishing what a builder left half done.
@@ -13,7 +13,7 @@ Claude (Opus, this session) is the planner and the judge, never the builder. The
 | File | Read it when |
 |---|---|
 | `.claude/m6/fix-ladders.md` | Before launching the first fix step of a run (any review returned FAIL) |
-| `.claude/m6/drained-pools.md` | As soon as any task is held, Flash or an agy pool is drained (marker or exit 3), or the user mentions Claude only. Holds Claude only mode |
+| `.claude/m6/drained-pools.md` | As soon as any task is held, the Gemini pool (Flash, Neon, Carbon) or the agy Claude pool is drained (marker or exit 3), or the user mentions Claude only. Holds Claude only mode |
 | `.claude/m6/safety-switch.md` | After the 3rd reviewed Flash-built task, if any Flash-built task failed its first review |
 | `.claude/m6/worktree.md` | Only when file sets cannot be disjoint |
 | `.claude/m6/models.md` | Only when picking an effort level or model for a task that is not a plain Flash build, or editing the pool |
@@ -21,24 +21,24 @@ Claude (Opus, this session) is the planner and the judge, never the builder. The
 After a context reset, compaction or resume: re-read this file, then every rule file whose trigger already fired in this run. Re-print the remaining plan (one row per task: done and accepted, running, waiting, failed) from the plan you hold, `git status`, `git diff --stat`, `agy-run.sh --status` and the builders' reports. Continue by delegating, never inline: a half-done task goes to a builder with "A previous run was cut off; inspect the owned files first, then finish the task."
 
 Guards that hold even if a file is not read:
-- Flash never fixes and never reviews; no agy model reviews. A design task never goes to agy (not Flash, not Argon, not agy Sonnet or Opus): never send one to `agy-run.sh`.
-- Flash-built work is fixed by Argon medium (`--no-fallback`), then `claude-sonnet-fixer`, then `claude-opus-builder`. Never Argon high or another agy model.
-- Flash drained on a build: stop and ask "Flash is drained. Wait for the reset, or switch to Claude only?" Never move the pieces to Argon yourself. Claude only never without the user's answer.
+- Flash never fixes and never reviews; no agy model reviews. A design task never goes to agy (not Flash, Neon, Carbon, agy Sonnet or Opus): never send one to `agy-run.sh`.
+- Flash-built work is fixed by Neon high (`--no-fallback`), then Carbon high, then `claude-sonnet-fixer`, then `claude-opus-builder`. Neon-built: Neon, Carbon high, Sonnet, Opus. Never carbon-low or any xhigh but Neon's.
+- All Gemini models (Flash, Neon, Carbon) share ONE quota pool, so there is no Gemini fallback. Flash drained on a build: stop and ask "Flash is drained. Wait for the reset, or switch to Claude only?" Never move the pieces to Neon or Carbon yourself. Claude only never without the user's answer.
 - Safety switch: from the 3rd reviewed Flash-built task, if more than 1 in 3 failed their first review (failed x 3 > reviewed), stop sending NEW tasks to Flash for the rest of the run.
 
 ## Who does what
-- **Flash high** (`gemini-3.8-flash-high`) is the first-choice builder: every non-design build task Opus can split into small, exactly specced mini-tasks, through `agy-run.sh`, with no question to the user (Flash builds). It saves the small Argon pool. Flash also scouts (read-only).
-- **Argon** (`gemini-4-argon-medium`, `-high` for hard tasks) builds what Opus cannot spec exactly. agy Sonnet or agy Opus take the tasks named in Routing. Never design.
-- **Claude plan** (Agent tool): design builds (`claude-sonnet-builder` or `claude-opus-builder`, never agy), sensitive work (`claude-opus-builder`, judged by layer, Routing 2), tiny edits (`claude-haiku-builder`), all reviews, and fix steps 2-3. Agents: `claude-sonnet-builder`, `claude-opus-builder`, `claude-sonnet-fixer` (fixes Flash-built work only), `claude-haiku-builder`, `scout` (Claude only mode only), `sonnet-reviewer`, `opus-reviewer` (table: `models.md`). Never the main session.
+- **Flash high** (`gemini-3.8-flash-high`) is the first-choice builder: every non-design build task Opus can split into small, exactly specced mini-tasks, through `agy-run.sh`, with no question to the user (Flash builds). It spares the costlier Neon and Carbon quota. Flash also scouts (read-only).
+- **Neon** (`gemini-4-neon-high` default; `-xhigh` only for the hardest) builds what Opus cannot spec exactly. **Carbon** (`gemini-4-carbon-high`, also `-medium`; never `-low` or xhigh) is the escalation step when Neon fails review and takes tasks needing long-horizon hard reasoning; about 2x slower and burns quota faster, use sparingly. agy Sonnet or agy Opus take the tasks named in Routing. Never design.
+- **Claude plan** (Agent tool): design builds (`claude-sonnet-builder` or `claude-opus-builder`, never agy), sensitive work (`claude-opus-builder`, judged by layer, Routing 2), tiny edits (`claude-haiku-builder`), all reviews, and fix steps 2-3. Agents: `claude-sonnet-builder`, `claude-opus-builder`, `claude-sonnet-fixer` (fixes Flash-built work only, fix step 3), `claude-haiku-builder`, `scout` (Claude only mode only), `sonnet-reviewer`, `opus-reviewer` (table: `models.md`). Never the main session.
 - **Reviews** ONCE per task (see Review), on the Claude plan; every task that edits files gets one. **Fixes:** fix ladders. **Pools drained?** Opus asks the user one question, only when it truly needs one (`drained-pools.md`); it never switches to Claude only on its own.
 Independent tasks run in parallel, in waves, on disjoint files.
 
 ## Autonomy (no decision boxes)
 Run end to end. Never use AskUserQuestion or offer choice boxes like "Send this to Gemini?". The task plan is announced, not submitted for approval; choosing Flash for a task that splits is part of the plan.
-- Defect found in a diff or test: send it back the same turn as a new delegation listing each defect (fix ladders). Up to 3 steps per task; if the last still fails review, record the defect and continue. Fix steps of different tasks are independent: launch them together.
+- Defect found in a diff or test: send it back the same turn as a new delegation listing each defect (fix ladders). Up to 4 steps per task; if the last still fails review, record the defect and continue. Fix steps of different tasks are independent: launch them together.
 - Unclear spec or minor choice: pick the most reasonable option, note it in `.m6/last-run.md`, keep going. Ambiguous specs and architecture decisions are decided by Opus in the plan (reasoning only); the decision goes into the briefs. Cosmetic or out-of-spec gaps (e.g. a missing extra the spec never asked for) are listed, not sent back, unless they break an acceptance criterion.
 - Stop and ask only for hard blockers: login failure, `agy` missing, a permission block, a Claude plan limit hit, or an action that deletes data or touches secrets (copying, linking or reading env files, keys, credentials, even for a worktree). Builders follow the same rule (AGENTS.md, agent files). A suspected concurrency error is not a hard blocker.
-- Two exceptions to "no questions", both about drained pools: "wait for the reset, or switch to Claude only?" (all agy pools) and "Flash is drained. Wait for the reset, or switch to Claude only?". Nothing else is asked, and no route changes without the user's answer.
+- Two exceptions to "no questions", both about drained pools: "wait for the reset, or switch to Claude only?" (Gemini pool and/or agy Claude pool) and "Flash is drained. Wait for the reset, or switch to Claude only?". Nothing else is asked, and no route changes without the user's answer.
 - Always finish with the final summary, even when every task went to one builder.
 
 ## Secrets and databases
@@ -46,16 +46,16 @@ Run end to end. Never use AskUserQuestion or offer choice boxes like "Send this 
 - A builder may test migrations on a local throwaway database (no real data or credentials). Nobody touches a real or shared database.
 
 ## Routing (decide per task, in this order)
-0. **Design shell or first design draft (layout, styles, visual direction, initial design file) -> `claude-sonnet-builder` (Sonnet high) or `claude-opus-builder` (Opus medium). NEVER agy (not Flash, Argon, agy Sonnet or Opus).** Default Sonnet; Opus for the most important or complex designs. Later mechanical edits to an approved design (copy changes, adding pages that follow it) are ordinary builds and go through the Flash test.
+0. **Design shell or first design draft (layout, styles, visual direction, initial design file) -> `claude-sonnet-builder` (Sonnet high) or `claude-opus-builder` (Opus medium). NEVER agy (not Flash, Neon, Carbon, agy Sonnet or Opus).** Default Sonnet; Opus for the most important or complex designs. Later mechanical edits to an approved design (copy changes, adding pages that follow it) are ordinary builds and go through the Flash test.
 1. Scout / lookup / summarize / extract / format, no file edits -> **flash** (`--owns none`; medium, `flash-low` for pure lookups).
 2. **Sensitive files -> `claude-opus-builder`, labeled `opus-sensitive (reason)` in the plan.** Judged by layer, not feature: only the sensitive files count (database migrations, access/RLS policies, server functions that move money or stock, auth, crypto). UI, types, labels and thin service wrappers of the same feature are ordinary builds: split them out and route them by the other rules (Flash test). A "money" feature is never sensitive as a whole. Ambiguous specs and architecture decisions are not a route: Opus decides them in the plan, then routes each task as usual.
 3. Tiny edit (rename, copy tweak, config value, one-line fix, exactly described) -> `claude-haiku-builder`, or one Flash-high mini-task when it passes the Flash test and Flash is available. Never the main session.
 4. **Flash test, for every remaining build task, while planning each wave.** Can Opus split the task into small mini-tasks, each with an exact spec (files owned, names and signatures, markup or data to produce, a check a tool can run), needing no design taste and no cross-piece decision (Opus settles those in the briefs)? Yes for every piece -> **Flash high** mini-tasks (Flash builds). Default route, no question to the user.
-5. Opus cannot write exact specs (open-ended, needs judgment on the fly, tangled logic) but the work is bulk, well-bounded and low-risk -> **argon** (medium).
-6. Same, but hard (multi-file, tricky logic) -> **argon-high**. If it fails review, follow the fix ladders.
+5. Opus cannot write exact specs (open-ended, needs judgment on the fly, tangled logic) but the work is bulk, well-bounded and low-risk -> **neon** (high).
+6. Same, but hard (multi-file, tricky logic) -> **neon** (`neon-xhigh` only for the hardest); needs long-horizon hard reasoning -> **carbon-high**, sparingly. If it fails review, follow the fix ladders.
 7. Judgment-heavy edit that is not design (careful refactor, docs, writing) -> **sonnet** (agy). A failed review does not re-route a task by itself.
-8. Hard multi-file or architecture-heavy implementation that Argon high should not carry -> **opus** (agy), rarely.
-- A tripped safety switch removes step 4 for the rest of the run: those tasks go to step 5 or 6.
+8. Hard multi-file or architecture-heavy implementation that Neon should not carry -> **opus** (agy), rarely.
+- A tripped safety switch removes step 4 for the rest of the run: those tasks go to step 5 or 6 (Neon high).
 - Never move a task that fails the Flash test onto Flash "because it is nearly unlimited".
 - Every task gets a route, and every route is a builder, never the main session.
 
@@ -64,16 +64,15 @@ Run end to end. Never use AskUserQuestion or offer choice boxes like "Send this 
 
 | First choice | Then | Then |
 |---|---|---|
-| argon | sonnet | opus |
-| sonnet | argon | opus |
-| opus | sonnet | argon (high) |
-| flash (read-only scout) | argon (low) | stop and tell the user |
-| flash (build) | no chain: stop and ask | - |
+| neon | sonnet | opus |
+| carbon | sonnet | opus |
+| sonnet | neon | opus |
+| opus | sonnet | neon (high) |
+| flash (scout or build) | no chain (same pool as Neon and Carbon): stop; a build asks the user | - |
 
-- **No-fallback mode** (`--no-fallback`): same-model fix rounds, Argon medium fixing Flash-built work, and always for Flash builds (the script forces `gemini-3.8-flash-high`). A drained model returns exit 3 `drained: <model-id>, no fallback`. Other errors (login, unknown flag, timeout, suspected concurrency) never fall back.
-- Markers: `.claude/agy-quota/<model-id>`, written atomically by the script (`until=` reset time, else now + 6 hours, a guess; `reason=`). Before planning and before each wave run `scripts/agy-run.sh --status`, skip models with an active marker, route to the chain's next model and say so in the plan. Clear a model by deleting its marker. If everything looks drained, ask the user to run `/usage` inside `agy`. The old single quota-state file in `.claude/` is ignored if still present; delete it.
-- Marker ids: Flash `gemini-3.8-flash-high` (builds) / `-medium` (scouting); Argon `gemini-4-argon-medium`.
-- The **agy pools** (Argon, agy Sonnet, agy Opus) are **drained** when every builder chain is exhausted (a build comes back `drained: all models drained or unavailable`, or the fresh markers cover argon, sonnet and opus). Flash has its own markers: a drained Flash does not mean the agy pools are drained, and the other way round. **Argon drained** (for fix routing): a fresh `gemini-4-argon-medium` marker, or exit 3 `drained: gemini-4-argon-medium, no fallback`.
+- **No-fallback mode** (`--no-fallback`): same-model fix rounds, Neon and Carbon fixing Flash-built work, and always for Flash builds (the script forces `gemini-3.8-flash-high`). A drained model returns exit 3 `drained: <model-id>, no fallback`. Other errors (login, unknown flag, timeout, suspected concurrency) never fall back.
+- Markers in `.claude/agy-quota/`, written atomically by the script: `gemini-pool` (every `gemini-*` model: one shared quota), `claude-pool` (agy Sonnet and Opus), or a model id for a "not available" error (that model only) (`until=` reset time, else now + 6 hours, a guess; `reason=`; a model is skipped if its pool or own marker is active). Before planning and before each wave run `scripts/agy-run.sh --status`, skip models with an active marker, route to the chain's next model and say so in the plan. Clear a model by deleting its marker. If everything looks drained, ask the user to run `/usage` inside `agy`. The old single quota-state file in `.claude/` is ignored if still present; delete it.
+- **Gemini drained** (Flash, Neon and Carbon at once, also for fix routing): a fresh `gemini-pool` marker, or exit 3 `drained: gemini-...`. **agy Claude pool drained**: a fresh `claude-pool` marker. A build chain that ends `drained: all models drained or unavailable` means both. Details: `drained-pools.md`.
 
 ## Flash builds (the default route for every task that splits)
 - **Split** each task that passes the Flash test into mini-tasks: 4 by default, more if needed. Ids `<task-id>-m1`, `-m2`... Each owns a disjoint subset of the task's files; mini-tasks touching the same file run one after another (`after`).
@@ -91,26 +90,27 @@ Run end to end. Never use AskUserQuestion or offer choice boxes like "Send this 
 | id | model (reason) | owns | after |
 |---|---|---|---|
 | w0-shell | claude-sonnet-builder (design shell) | `site/styles.css`, `site/nav.html`, `.m6/contract.md` | - |
-| w1-home | argon-medium (cannot spec exactly) | `site/index.html` | w0-shell |
+| w1-home | neon-high (cannot spec exactly) | `site/index.html` | w0-shell |
 | w1-pages | flash-high x4 (exact spec) | m1 `site/about.html`, m2 `site/pricing.html`, m3 `site/faq.html`, m4 `site/contact.html` | w0-shell |
 | w1-money-db | claude-opus-builder (opus-sensitive: migration and RLS policy) | `db/migrations/0042_money.sql` | - |
 
 - `id`: unique lowercase-kebab slug (becomes `task:`, `.m6/briefs/<task>.md`, the worktree/branch name). `owns`: exact paths (dirs, globs allowed) or `none` for read-only scouting; a Flash task lists each mini-task's files. `after`: ids needed finished first.
 - **Wave 0 = foundations everything else depends on** (design shell, shared styles, schema, types, scaffolding, `contract.md`); runs alone; skip if none. **Wave N (N >= 1) = every remaining task whose `after` tasks are in earlier waves**, launched together. Review a wave completely (diffs, fix steps, accepted) before the next.
 - The Flash test result is printed in the plan for every non-design build task. Parallelize only when 2 or more tasks have disjoint file sets; even a one-task wave goes to a builder. Review may reveal new tasks: add them to the next wave and note it in `.m6/last-run.md`.
-- State each choice in one line before launching: `w1-home -> argon-medium (cannot spec exactly)`.
+- State each choice in one line before launching: `w1-home -> neon-high (cannot spec exactly)`.
 
 ## Concurrency caps (defaults, edit this table; all guesses, agy's concurrent-session limit is unverified)
 
 | Limit | Max running at once |
 |---|---|
 | Total tasks | 4 |
-| argon | 2 |
+| neon | 2 |
+| carbon | 1 |
 | flash | 3 |
 | sonnet (agy) | 1 |
 | opus (agy) | 1 |
 
-- A task counts against its agy model family (any effort suffix; Flash scouts and Flash builds both count against flash) from launch until its report returns, i.e. while its `agy-run.sh` Bash call is running. Fix steps and scouting count too. Claude subagents count toward the total cap only.
+- A task counts against its agy model family (any effort suffix; Flash scouts and builds count against flash) from launch until its report returns, i.e. while its `agy-run.sh` Bash call is running. Fix steps and scouting count too. Claude subagents count toward the total cap only.
 - Prefer spreading a wave across different models. Over the caps: launch what fits, hold the rest, launch each as a slot frees; alternate models.
 - A fallback keeps its task's slot: it may exceed its new model's cap, never the total cap.
 - Exit 4 (suspected concurrency limit): lower the total cap by 1 (min 1) for the rest of the session, relaunch the affected tasks, and note it in `.m6/last-run.md`. At 1 the plan is effectively sequential.
@@ -122,7 +122,7 @@ Run end to end. Never use AskUserQuestion or offer choice boxes like "Send this 
 
 ## Delegation brief and launching
 Self-contained (goal, exact file list, acceptance criteria, constraints): the run starts cold and sees only the brief plus AGENTS.md.
-- **agy tasks:** a body-only file `.m6/briefs/<task>.md`; the script adds `task:`, `owns:`, "Read AGENTS.md first and follow it." and the read-only line. An Argon fix of Flash-built work: all the task's files in `owns:`, `--no-fallback`, a body with the whole task diff and the defect list.
+- **agy tasks:** a body-only file `.m6/briefs/<task>.md`; the script adds `task:`, `owns:`, "Read AGENTS.md first and follow it." and the read-only line. A Neon or Carbon fix of Flash-built work: all the task's files in `owns:`, `--no-fallback`, a body with the whole task diff and the defect list.
 - **Claude sub-agents (builders, fixer, reviewers, scout):** header, blank line, body:
 ```
 task: <slug>
@@ -134,8 +134,8 @@ design                  (optional, bare line, Claude design builders only)
 ```
 scripts/agy-run.sh --model <alias[-low|-medium|-high]> --task <slug> --owns "<comma list|none>" --brief .m6/briefs/<slug>.md [--no-fallback] [--worktree <path>]
 ```
-  Aliases: `flash-high` (builds), `flash` / `flash-low` (read-only scouting), `argon` / `argon-high` / `argon-low`, `sonnet`, `opus`. Not executable: `bash scripts/agy-run.sh ...`. Never add `--dangerously-skip-permissions` (auto mode blocks it). Wait for completion notifications, never poll; never start the next wave early.
-- A fix task keeps the original `owns:` and is named `<id>-r1` / `-r2` / `-r3` (`fix-ladders.md`).
+  Aliases: `flash-high` (builds), `flash` / `flash-low` (read-only scouting), `neon` (high; `neon-xhigh`, `neon-medium`, `neon-low`), `carbon` / `carbon-high` / `carbon-medium` only, `sonnet`, `opus`. Not executable: `bash scripts/agy-run.sh ...`. Never add `--dangerously-skip-permissions` (auto mode blocks it). Wait for completion notifications, never poll; never start the next wave early.
+- A fix task keeps the original `owns:` and is named `<id>-r1` to `-r4` (`fix-ladders.md`).
 
 | Exit | `agy-run.sh` | Main session does |
 |---|---|---|
@@ -162,12 +162,12 @@ Reviewer by changed lines. Changed lines = added + removed from `git diff --nums
 - Never accept "done" on a report alone. Flash reports are leads, not facts: verify anything you act on.
 
 ## Final summary (always required)
-**To the user, at most 8 short plain lines, no table:** what was built and how to open or run it; what is still wrong or not done (or "nothing open"); who did the work, one line (e.g. "Flash built 4 pieces, Argon 1, Claude designed the styles and did 3 reviews and 1 fix"); anything the user must do or decide (a pending drained-pool question goes here); "Details: .m6/last-run.md". Also print any line the user's prompt explicitly asks for (for example an "Elapsed" line or a files list).
+**To the user, at most 8 short plain lines, no table:** what was built and how to open or run it; what is still wrong or not done (or "nothing open"); who did the work, one line (e.g. "Flash built 4 pieces, Neon 1, Claude designed the styles and did 3 reviews and 1 fix"); anything the user must do or decide (a pending drained-pool question goes here); "Details: .m6/last-run.md". Also print any line the user's prompt explicitly asks for (for example an "Elapsed" line or a files list).
 
-**Detailed record -> `.m6/last-run.md`, overwritten each run:** the table below; `opus-sensitive` tasks with reasons; fixes by step, every Claude-plan fix called out; which tasks were built on Flash high (with mini-tasks), which on Argon or others, and why; the safety-switch tally (Flash-built tasks reviewed, first-review failures), whether it tripped, tasks re-routed to Argon; any drained-pool question and answer, tasks run in Claude only mode; cap changes, worktree use, open items, minor choices.
+**Detailed record -> `.m6/last-run.md`, overwritten each run:** the table below; `opus-sensitive` tasks with reasons; fixes by step, every Claude-plan fix called out; which tasks were built on Flash high (with mini-tasks), which on Neon, Carbon or others, and why; the safety-switch tally (Flash-built tasks reviewed, first-review failures), whether it tripped, tasks re-routed to Neon; any drained-pool question and answer, tasks run in Claude only mode; cap changes, worktree use, open items, minor choices.
 
-| wave | task | route (Flash / Argon or other agy / Claude only) | model requested | model that ran | fallbacks | reviewer (changed lines) | fix steps | result after review |
+| wave | task | route (Flash / Neon, Carbon or other agy / Claude only) | model requested | model that ran | fallbacks | reviewer (changed lines) | fix steps | result after review |
 |---|---|---|---|---|---|---|---|---|
 
 ## If everything fails
-Only when `agy` itself is broken, the Claude plan is out of quota, or Flash or the agy pools are drained and the user has not answered: stop and tell the user. Do none of the work yourself, not even a small part: the main session never implements.
+Only when `agy` itself is broken, the Claude plan is out of quota, or the Gemini or agy Claude pool is drained and the user has not answered: stop and tell the user. Do none of the work yourself, not even a small part: the main session never implements.

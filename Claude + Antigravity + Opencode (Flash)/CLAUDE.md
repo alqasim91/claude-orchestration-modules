@@ -1,6 +1,6 @@
 @AGENTS.md
 
-# Orchestration (Claude + Antigravity + Opencode (Flash): Claude plans in phases; Flash and OpenCode free models build the volume, Argon takes hard tasks, the Claude plan designs, reviews and fixes)
+# Orchestration (Claude + Antigravity + Opencode (Flash): Claude plans in phases; Flash and OpenCode free models build the volume, Neon takes hard tasks (Carbon escalates), the Claude plan designs, reviews and fixes)
 
 ## Hard rule: the main session never implements
 Claude (Opus, this session) plans and judges, never builds. Even work that needs Opus runs in a sub-agent (`claude-opus-builder`). No exceptions (small jobs, sensitive work, finishing a builder's half-done task): route it.
@@ -32,17 +32,18 @@ Guards that hold even if a file is not read:
 |---|---|---|
 | **Flash** (`gemini-3.8-flash-high`) | `scripts/agy-run.sh --model flash-high` | **First choice for every build task Opus can split into exact mini-tasks**, and Flash scouting |
 | **OpenCode free models** (role chains) | `scripts/opencode-run.sh` | **Second choice for mini-tasks (silent fallback when Flash is drained).** First choice for scouting, image/audio/large input, non-splittable tasks that are not hard |
-| **Argon** (`gemini-4-argon-medium`) | `agy-run.sh --model argon` | **Hard tasks only**, and fix steps. Never design |
+| **Neon** (`gemini-4-neon-high`) | `agy-run.sh --model neon` | **Hard tasks only**, and fix steps. Never design |
+| **Carbon** (`gemini-4-carbon-high`) | `agy-run.sh --model carbon` | **Sparingly** (about 2x slower, double the cost per task): fix step after Neon fails review, and long-horizon hard reasoning. Never design |
 | **agy Sonnet / Opus** (`claude-sonnet-5-5-medium`, `claude-opus-5-5-medium`) | `agy-run.sh --model sonnet` / `opus` | **Fix rounds only.** Never build first, review or design |
 | **Claude plan** | Agent tool: `claude-sonnet-builder`, `claude-opus-builder`, `claude-sonnet-fixer`, `claude-haiku-builder`, `scout`, `sonnet-reviewer`, `opus-reviewer` | Design, sensitive work, tiny edits, all reviews, stand-in fix steps, Claude only mode |
 
-Each pool has its own quota markers. Design builds -> `claude-sonnet-builder` (default) or `claude-opus-builder`; sensitive work -> `claude-opus-builder`; tiny edits -> `claude-haiku-builder`; `scout` is Claude only mode only. Reviews: ONCE per task (see Review). Fixes: `.claude/m9/fix-ladders.md`. Fallbacks between pools (Flash <-> OpenCode, Argon -> OpenCode `hard`) are silent: re-route, print one plan line, do not ask. Claude only is the last fallback, only after the user says so. Independent tasks run in parallel, in phases, on disjoint files.
+Flash, Neon and Carbon are ONE Gemini quota pool (one marker, `gemini-pool`); agy Sonnet, agy Opus and each OpenCode model have their own markers. Design builds -> `claude-sonnet-builder` (default) or `claude-opus-builder`; sensitive work -> `claude-opus-builder`; tiny edits -> `claude-haiku-builder`; `scout` is Claude only mode only. Reviews: ONCE per task (see Review). Fixes: `.claude/m9/fix-ladders.md`. Fallbacks between pools (Flash <-> OpenCode, Neon/Carbon -> OpenCode `hard`) are silent: re-route, print one plan line, do not ask. Claude only is the last fallback, only after the user says so. Independent tasks run in parallel, in phases, on disjoint files.
 
-OpenCode roles: `scout`, `mech`, `build`, `hard`, `large` (input over about 150k tokens), `vision`, `av`; the script owns chains and fallback (`models.md`). `--private` keeps only the zero-retention models. agy aliases (`--model`): `flash-high` (builds), `flash` / `flash-low` (read-only scouting, `--owns none`), `argon` / `argon-high` / `argon-low`, `sonnet` / `opus` (fix tasks only).
+OpenCode roles: `scout`, `mech`, `build`, `hard`, `large` (input over about 150k tokens), `vision`, `av`; the script owns chains and fallback (`models.md`). `--private` keeps only the zero-retention models. agy aliases (`--model`): `flash-high` (builds), `flash` / `flash-low` (read-only scouting, `--owns none`), `neon` (high, default) / `neon-medium` / `neon-low` / `neon-xhigh` (hardest only), `carbon` (high) / `carbon-medium` (never low, never xhigh), `sonnet` / `opus` (fix tasks only).
 
 ## Autonomy (no decision boxes)
 Run end to end. Never use AskUserQuestion or offer choice boxes. The plan is announced, not submitted for approval.
-- Defect found: send it back the same turn as a new delegation listing each defect (fix ladders). Up to 4 steps per task; if the last still fails, record it and continue.
+- Defect found: send it back the same turn as a new delegation listing each defect (fix ladders). Up to 5 steps per task; if the last still fails, record it and continue.
 - Unclear spec or minor choice: pick the most reasonable option, note it in `.m9/last-run.md`. Ambiguous specs and architecture decisions are decided by Opus in the plan (reasoning only) and go into the briefs. Cosmetic or out-of-spec gaps are listed, not sent back, unless they break an acceptance criterion.
 - Stop and ask only for hard blockers: login failure, `agy` or `opencode` missing, a permission block, a Claude plan limit hit, or an action that deletes data or touches secrets (copying, linking or reading env files, even for a worktree). A suspected concurrency error is not one.
 - ONE exception: the drained-pools question (`drained-pools.md`). No Claude only without the user's answer.
@@ -51,8 +52,8 @@ Run end to end. Never use AskUserQuestion or offer choice boxes. The plan is ann
 ## Secrets, databases, data rule
 - Env files (`.env`, `.env.local`...), keys, credentials: copying, linking or reading them means stop and ask. Binds the main session and every builder. Never put them in a brief.
 - A builder may test migrations on a local throwaway database (no real data or credentials). Nobody touches a real or shared database.
-- S = 0 and no personal data: any pool. S = 1 (near auth, PII, customer data, business-private code): OpenCode only with `--private`, or Flash or Argon; never an OpenCode chain without `--private`. S = 2 (auth, crypto, secrets, payments, PHI, tenancy): never a free model; `claude-opus-builder`.
-- Private code (a client's or employer's repo): `--private` on EVERY OpenCode task, scouting included. Flash and Argon (Google) are allowed. If the user does not want Gemini to see a client's code, they say so in the prompt and Opus keeps those tasks on OpenCode `--private` or Claude.
+- S = 0 and no personal data: any pool. S = 1 (near auth, PII, customer data, business-private code): OpenCode only with `--private`, or Gemini (Flash, Neon); never an OpenCode chain without `--private`. S = 2 (auth, crypto, secrets, payments, PHI, tenancy): never a free model; `claude-opus-builder`.
+- Private code (a client's or employer's repo): `--private` on EVERY OpenCode task, scouting included. Flash, Neon and Carbon (Google) are allowed. If the user does not want Gemini to see a client's code, they say so in the prompt and Opus keeps those tasks on OpenCode `--private` or Claude.
 
 ## Score every build task (0 / 1 / 2 each)
 
@@ -73,10 +74,10 @@ Run end to end. Never use AskUserQuestion or offer choice boxes. The plan is ann
 1. **Read-only** (find, explain, summarize, extract, format, and any self-check or audit the prompt asks for: link, accessibility, leftover-text checks) -> OpenCode `scout`. A check is a scout task with its own plan row, after the build phase it checks. The main session never does it, not even by reading files. Chain drained -> Flash scout (`flash`, `flash-low` for lookups). Both drained -> held. No review.
 2. **Sensitive files -> `claude-opus-builder`, labeled `opus-sensitive (reason)`.** By layer, not feature: only the sensitive files count (migrations, access/RLS policies, server functions that move money or stock, auth, crypto). UI, types, labels and thin wrappers of the same feature are ordinary builds: split out and route below.
 3. **Tiny edit** (rename, copy tweak, config value, one-line fix, exactly described) -> `claude-haiku-builder`, or one Flash-high mini-task when it passes the Flash test (6) and Flash is available.
-4. **Special input.** Images -> OpenCode `vision`. Audio or video -> `av`. Input over about 150k tokens -> `large`. No Flash or Argon alternative: a drained chain is held.
-5. **Hard** -> **Argon** (medium; `argon-high` for the hardest). Argon drained -> OpenCode `hard`, silently. Both drained -> held. Argon takes nothing else, except fix step 1 for Flash-built work.
-6. **Flash test, every remaining build task.** Can Opus split it into small mini-tasks, each with an exact spec (files owned, names and signatures, markup or data to produce, a check a tool can run), needing no design taste and no cross-piece decision (Opus settles those in the briefs)? Yes -> **Flash high** mini-tasks. Flash drained or tripped -> the same mini-tasks on OpenCode `build` (`mech` when A, R, S, V, D are all 0 and the total is 2 or less), silently. Both drained -> held.
-7. **Everything else** (not exactly specable, not hard: docs, copy, standard logic, tests) -> one OpenCode `build` task for the whole task. `build` drained -> held. Never onto Flash "because it is nearly unlimited", never onto Argon unless a safety switch says so.
+4. **Special input.** Images -> OpenCode `vision`. Audio or video -> `av`. Input over about 150k tokens -> `large`. No Gemini alternative: a drained chain is held.
+5. **Hard** -> **Neon** (high; `neon-xhigh` only for the hardest; `carbon` high only for long-horizon hard reasoning, sparingly). Gemini pool drained -> OpenCode `hard`, silently. Both drained -> held. Neon takes nothing else, except fix steps.
+6. **Flash test, every remaining build task.** Can Opus split it into small mini-tasks, each with an exact spec (files owned, names and signatures, markup or data to produce, a check a tool can run), needing no design taste and no cross-piece decision (Opus settles those in the briefs)? Yes -> **Flash high** mini-tasks. Flash or the Gemini pool drained, or Flash tripped -> the same mini-tasks on OpenCode `build` (`mech` when A, R, S, V, D are all 0 and the total is 2 or less), silently. Both drained -> held.
+7. **Everything else** (not exactly specable, not hard: docs, copy, standard logic, tests) -> one OpenCode `build` task for the whole task. `build` drained -> held. Never onto Flash "because it is nearly unlimited", never onto Neon unless a safety switch says so.
 - `--private` on any OpenCode route for S = 1 or a private repo.
 - Tie-breakers: unsure `mech` vs `build` -> `build`. Unsure `build` vs `hard` -> `build`, unless D = 2.
 - **Small job:** 2 or fewer build tasks, none S = 2, D = 2 or hard: one task, one route, normal review, no phases, no scout unless something is genuinely unknown.
@@ -86,7 +87,7 @@ Run end to end. Never use AskUserQuestion or offer choice boxes. The plan is ann
 - agy: `.claude/agy-quota/<model-id>`, written by `agy-run.sh` (`until` = reset time, else now + 6 hours, a guess). Check `scripts/agy-run.sh --status`.
 - OpenCode: `.claude/opencode-quota/<model-id>`, written by the script (reset time, else now + 1 hour; unavailable models 24 hours). Check `scripts/opencode-run.sh --status --role <role>` (exit 3 = whole chain drained).
 - Before planning and before each phase run both checks (each OpenCode role in the plan). Route around drained models and say so in the plan line.
-- Drained = an active marker or exit 3. Flash: `gemini-3.8-flash-high` (builds) / `gemini-3.8-flash-medium` (scouting). Argon: `gemini-4-argon-medium`. agy Sonnet / Opus: `claude-sonnet-5-5-medium` / `claude-opus-5-5-medium`.
+- Drained = an active marker or exit 3. ALL Gemini (Flash `gemini-3.8-flash-high`/`-medium`, Neon, Carbon) share ONE marker `.claude/agy-quota/gemini-pool`: drained = every Gemini step skipped, OpenCode takes over silently (a "not available" error marks only that model id). agy Sonnet / Opus: `claude-sonnet-5-5-medium` / `claude-opus-5-5-medium`.
 - Clear a marker by deleting its file. If everything looks drained, ask the user to run `/usage` inside `agy` and check `opencode`.
 
 ## Flash builds (default route for every task that splits)
@@ -111,7 +112,7 @@ Columns: `id | phase | route (reason) | score (A N C R S V D, e.g. A1 N1 C1 R0 S
 - **Phase 0** = foundations (design shell, shared styles, schema, types, scaffolding); runs alone; skip if none. **Phase N** = every remaining task whose `after` tasks are in earlier phases; parallel on disjoint files. Review a phase completely (diffs, fixes, accepted) before the next. New tasks found in review go to the next phase.
 
 ## Concurrency caps (defaults, guesses)
-Max running at once: total 4 (all pools, Claude sub-agents included) · Flash 3 (running `agy-run.sh` calls, builds and scouts) · OpenCode 3 (all roles) · OpenCode `hard` or `large` 1 · Argon 1 · agy Sonnet 1 · agy Opus 1.
+Max running at once: total 4 (all pools, Claude sub-agents included) · Flash 3 (running `agy-run.sh` calls, builds and scouts) · Neon 1 · Carbon 1 (Flash + Neon + Carbon together at most 4: one pool) · OpenCode 3 (all roles) · OpenCode `hard` or `large` 1 · agy Sonnet 1 · agy Opus 1.
 - A task counts from launch until its report returns; fix steps and scouting count. Claude sub-agents count toward the total only. Over the caps: launch what fits, queue the rest, alternate pools; a re-route keeps its slot.
 - `agy-run.sh` exit 4: lower the total cap by 1 (min 1) for the session, relaunch, note it. OpenCode report starting `note: limits hit on N models`: lower the OpenCode cap by 1 (min 1), note it.
 
@@ -149,8 +150,8 @@ scripts/opencode-run.sh --role <role> --task <slug> --owns "<comma list|none>" -
 
 ## Review
 Changed lines = added + removed from `git diff --numstat -- <owned files>` plus lines of new untracked owned files (scripts report the sum; else compute read-only). A split task uses the combined diff.
-- 800 or fewer -> `sonnet-reviewer`. More than 800, or hard-routed (Argon, OpenCode `hard`) or `opus-sensitive` at any size -> `opus-reviewer`.
-- Applies to every build: Flash, OpenCode, Argon, Claude builders (sensitive included), tiny edits. No agy or OpenCode model reviews, ever (reviewers must not edit). The reviewer is at least a grade above the implementer. The main session never reads a full diff.
+- 800 or fewer -> `sonnet-reviewer`. More than 800, or hard-routed (Neon, Carbon, OpenCode `hard`) or `opus-sensitive` at any size -> `opus-reviewer`.
+- Applies to every build: Flash, OpenCode, Neon, Carbon, Claude builders (sensitive included), tiny edits. No agy or OpenCode model reviews, ever (reviewers must not edit). The reviewer is at least a grade above the implementer. The main session never reads a full diff.
 - After a fix step, review again on the whole diff (over 800 moves up to `opus-reviewer`); tell the reviewer the previous defects.
 - The first review of each Flash- and OpenCode-built task feeds the safety-switch tallies. Give the reviewer the header and the acceptance criteria. It returns PASS or FAIL with numbered defects; non-blocking notes are not sent back unless they break a criterion.
 - Check each report's "possibly from other parallel tasks" list: every path must be owned by another task in the phase. A stray edit to an unowned file is a defect: after the phase, list it in `.m9/last-run.md` or send it to a builder to revert. The main session never reverts a file.
@@ -161,7 +162,7 @@ Changed lines = added + removed from `git diff --numstat -- <owned files>` plus 
 
 **Detailed record -> `.m9/last-run.md`, overwritten each run:** the table below; `opus-sensitive` tasks with reasons; fixes by step, every Claude-plan fix called out; every silent re-route; safety-switch tallies and trips; drained-pools question and answer, Claude only mode tasks; cap changes, worktree use, open items, minor choices.
 
-| phase | task | pool (Flash / OpenCode / Argon / Claude / Claude only) | model requested | model that ran | chain walk or re-route | reviewer (changed lines) | fix steps | result after review |
+| phase | task | pool (Flash / OpenCode / Neon / Carbon / Claude / Claude only) | model requested | model that ran | chain walk or re-route | reviewer (changed lines) | fix steps | result after review |
 |---|---|---|---|---|---|---|---|---|
 
 After each task append one line to `.m9/TASKS.md`: `ID | phase | pool | model that ran | score | reviewer | rounds | result | notes`.

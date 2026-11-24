@@ -73,7 +73,18 @@ Fake a drained Antigravity before you paste a prompt. In the project folder (Mac
 
 ```bash
 mkdir -p .claude/agy-quota
-for m in gemini-4-argon-medium gemini-4-argon-high claude-sonnet-5-5-medium claude-opus-5-5-medium; do printf 'until=2099-01-01T00:00:00Z\nreason=test\n' > ".claude/agy-quota/$m"; done
+for m in gemini-pool claude-pool; do printf 'until=2099-01-01T00:00:00Z\nreason=test\n' > ".claude/agy-quota/$m"; done
 ```
 
-Then paste Prompt A. Opus should still build the design shell with a Claude builder, then stop and ask ONE question: "a) switch to Flash, or b) switch to Claude only?" (or "wait for the reset, or switch to Claude only?" if it judges the work too big for Flash). It must not pick for you. Answer a) and check that each task is split into mini-tasks and reviewed once per task, after all its mini-tasks. `scripts/agy-run.sh --status` should list the four markers, and `.claude/m6/drained-builders.md` should have been read before the question. Delete the marker files when you are done: `rm .claude/agy-quota/*`.
+Then paste Prompt A. Opus should still build the design shell with a Claude builder, then stop and ask ONE question. Flash shares the drained Gemini pool, so expect "wait for the reset, or switch to Claude only?" (not the Flash option). It must not pick for you. Answer b) and check that the remaining tasks go to Claude builders only. `scripts/agy-run.sh --status` should list the two pool markers (`gemini-pool`, `claude-pool`), and `.claude/m6/drained-builders.md` should have been read before the question. Delete the marker files when you are done: `rm .claude/agy-quota/*`.
+
+## Optional: test the shared Gemini pool
+
+One marker drains every Gemini model, and Claude models in agy are a separate pool:
+
+```bash
+mkdir -p .claude/agy-quota
+printf 'until=2099-01-01T00:00:00Z\nreason=test\n' > .claude/agy-quota/gemini-pool
+scripts/agy-run.sh --status
+```
+`--status` should list `gemini-pool` only (`agy: 1 limits active`). Then paste Prompt A: Argon, Carbon and Flash must all be skipped (no Gemini fallback), builds step to agy Sonnet or Opus, and the plan says so. Delete the marker when done: `rm .claude/agy-quota/gemini-pool`.

@@ -18,8 +18,9 @@
 # the script also refuses a brief whose first line is the bare word "design").
 # --model missing = hydrogen (the default builder, high effort). neon = hard tasks, default high effort. --task missing = a generated slug (said in the report). --owns missing = the run
 # goes ahead unscoped and the report says so (a Flash call without --owns is a read-only scout; Flash never builds).
-# Hydrogen = gemini-4-hydrogen-<low|medium|high|xhigh>, Neon = gemini-4-neon-<low|medium|high|xhigh>. The aliases `hydrogen` and
-# `neon` mean high; a suffix (`neon-xhigh`, `hydrogen-medium`) picks another effort. Every other alias defaults to medium.
+# Hydrogen = gemini-4-hydrogen-<low|medium|high|xhigh>, Neon = gemini-4-neon-<low|medium|high|xhigh>, Carbon = gemini-4-carbon-<medium|high>
+# (never low or xhigh: refused, exit 2). The aliases `hydrogen`, `neon` and `carbon` mean high; a suffix (`neon-xhigh`,
+# `hydrogen-medium`) picks another effort. Every other alias defaults to medium.
 #
 # Exit codes:
 #   0 success (report printed)
@@ -31,7 +32,7 @@
 #   4 suspected concurrency limit: first line "concurrency: <quoted text>". No marker, no fallback
 #
 # Markers: .claude/agy-quota/<name>, two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
-# <name> is the model id (Argon, agy Sonnet/Opus) or `gemini-pool` (Hydrogen, Neon and Flash share one quota; see pool_of).
+# <name> is the model id (agy Sonnet/Opus) or `gemini-pool` (every gemini-* model shares one quota; see pool_of).
 # until = the reset time parsed from the output, else now + 6 hours (a guess: agy reset times are unpublished).
 # Legacy markers (one line, a bare ISO time) count as active for 6 hours from that time.
 # With --status: prints active markers and "agy: N models limited". Always exit 0.
@@ -69,37 +70,35 @@ CONC_RE='concurrent|too many sessions|another session|already running|locked'
 # ================= ALIASES, EFFORT SUFFIX, CHAINS (edit together with CLAUDE.md) =================
 # Alias -> agy model id. A -low / -medium / -high suffix on the alias picks the effort (default medium):
 #   hydrogen -> gemini-4-hydrogen-<effort> (default high; also xhigh)   neon -> gemini-4-neon-<effort> (default high; also xhigh)
-#   argon -> gemini-4-argon-<effort>   sonnet -> claude-sonnet-5-5-<effort>   opus -> claude-opus-5-5-<effort>
+#   carbon -> gemini-4-carbon-<effort> (default high; only medium and high exist)
+#   sonnet -> claude-sonnet-5-5-<effort>   opus -> claude-opus-5-5-<effort>
 #   flash -> gemini-3.8-flash-<effort> (read-only scouting only; Flash never builds)
-#   A -xhigh suffix exists for hydrogen and neon only (other families: the id is checked against `agy models`).
+#   A -xhigh suffix exists for hydrogen and neon only; carbon has medium and high only (other families: the id is checked against `agy models`).
 # A full model id is used as given (no chain, except that a known family id behaves like its alias).
 alias_family() {   # $1 alias word (no suffix); prints the family or returns 1
-  case "$1" in hydrogen|neon|flash|argon|sonnet|opus) echo "$1" ;; *) return 1 ;; esac
+  case "$1" in hydrogen|neon|carbon|flash|sonnet|opus) echo "$1" ;; *) return 1 ;; esac
 }
 family_id() {      # $1 family  $2 effort
   case "$1" in
     hydrogen) echo "gemini-4-hydrogen-$2" ;;
     neon)   echo "gemini-4-neon-$2" ;;
     flash)  echo "gemini-3.8-flash-$2" ;;
-    argon)  echo "gemini-4-argon-$2" ;;
+    carbon) echo "gemini-4-carbon-$2" ;;
     sonnet) echo "claude-sonnet-5-5-$2" ;;
     opus)   echo "claude-opus-5-5-$2" ;;
   esac
 }
 # Fallback chain after the first choice, builders only. Tokens are alias[-effort]. Never a Claude (non-agy) model.
-#   hydrogen -> argon -> sonnet.   neon -> argon -> sonnet.   (read-only: hydrogen or neon -> argon.)
-#   Neon and Flash are NOT in a Hydrogen chain, and Hydrogen and Flash are NOT in a Neon chain: all three share one quota,
-#   so when one is drained the others are too. Argon (own weekly limit) is the fallback of the Gemini pool.
-#   argon -> sonnet -> opus.  sonnet -> argon -> opus.  opus -> sonnet -> argon-high.
-#   A read-only Flash scout: flash -> argon-low -> stop.  A Flash build is refused (exit 2).
+#   hydrogen -> sonnet.   neon -> sonnet.   carbon -> sonnet.   (read-only Gemini scouts: no fallback, stop.)
+#   No Gemini model is in another Gemini model's chain: all Gemini models share one quota, so when one is drained
+#   the others are too. agy Sonnet / Opus (Claude and GPT pool) are the only fallbacks.
+#   sonnet -> opus.  opus -> sonnet.
+#   A read-only Flash scout: flash -> stop and tell the user.  A Flash build is refused (exit 2).
 chain_after() {    # $1 family  $2 readonly(0|1)  $3 exact(0|1, unused)
   case "$1:$2" in
-    hydrogen:1|neon:1) echo "argon" ;;
-    hydrogen:0|neon:0) echo "argon sonnet" ;;
-    argon:*)      echo "sonnet opus" ;;
-    sonnet:*)     echo "argon opus" ;;
-    opus:*)       echo "sonnet argon-high" ;;
-    flash:1)      echo "argon-low" ;;
+    hydrogen:0|neon:0|carbon:0) echo "sonnet" ;;
+    sonnet:*)     echo "opus" ;;
+    opus:*)       echo "sonnet" ;;
     *)            echo "" ;;
   esac
 }
@@ -139,10 +138,10 @@ marker_until() {    # prints the until time (UTC ISO) if the model's marker is a
   return 0
 }
 
-# Gemini quota pool: Hydrogen, Neon and Flash share ONE quota (weekly + 5-hour limits; confirmed from the user's
-# Antigravity usage screen, 2026-11-19). When one of them is drained, all are. The pool has ONE marker, `gemini-pool`.
-# Argon has its own separate weekly limit, so it keeps its own per-model marker. agy Sonnet/Opus (Claude and GPT pool) too.
-pool_of() { case "$1" in gemini-4-hydrogen-*|gemini-4-neon-*|gemini-3.8-flash-*) echo gemini-pool ;; esac; }
+# Gemini quota pool: ALL Gemini models (Neon, Carbon, Hydrogen, Flash) share ONE quota (user decision 2026-11-24).
+# When one of them is drained, all are. The pool has ONE marker, `gemini-pool`. agy Sonnet/Opus (Claude and GPT pool)
+# keep their own per-model markers.
+pool_of() { case "$1" in gemini-*) echo gemini-pool ;; esac; }
 drain_until() {     # $1 model id: prints the until time if the model OR its pool has an active marker
   local u p
   u=$(marker_until "$1")
@@ -207,7 +206,7 @@ case "$_a" in
   *-high)   _e=high;   _a="${_a%-high}" ;;
 esac
 if FAMILY=$(alias_family "$_a"); then
-  _d=medium; { [ "$FAMILY" = "hydrogen" ] || [ "$FAMILY" = "neon" ]; } && _d=high   # `hydrogen` and `neon` mean high
+  _d=medium; { [ "$FAMILY" = "hydrogen" ] || [ "$FAMILY" = "neon" ] || [ "$FAMILY" = "carbon" ]; } && _d=high   # these mean high
   EFFORT="${_e:-$_d}"
   ID=$(family_id "$FAMILY" "$EFFORT")
 else
@@ -216,10 +215,15 @@ else
     gemini-4-hydrogen-*)   FAMILY=hydrogen; EFFORT="${ID##*-}" ;;
     gemini-4-neon-*)       FAMILY=neon;   EFFORT="${ID##*-}" ;;
     gemini-3.8-flash-*)    FAMILY=flash;  EFFORT="${ID##*-}" ;;
-    gemini-4-argon-*)      FAMILY=argon;  EFFORT="${ID##*-}" ;;
+    gemini-4-carbon-*)     FAMILY=carbon; EFFORT="${ID##*-}" ;;
     claude-sonnet-5-5-*)   FAMILY=sonnet; EFFORT="${ID##*-}" ;;
     claude-opus-5-5-*)     FAMILY=opus;   EFFORT="${ID##*-}" ;;
   esac
+fi
+
+# Carbon exists at medium and high only (never low: costs more per task; no xhigh).
+if [ "$FAMILY" = "carbon" ] && [ "$EFFORT" != "medium" ] && [ "$EFFORT" != "high" ]; then
+  die "refused: Carbon has only medium and high (no low, no xhigh): $ID"
 fi
 
 # ---- Owned pathspecs ----

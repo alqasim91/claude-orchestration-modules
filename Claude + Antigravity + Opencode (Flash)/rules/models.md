@@ -6,11 +6,12 @@ IDs confirmed from `agy models` (2026-10-25) and `opencode models opencode --ver
 
 | Alias | agy model ID | Use for | Quota notes |
 |---|---|---|---|
-| flash-high (build) | `gemini-3.8-flash-high` | **First-choice builder** for any non-design task Opus can split into small, exactly specced mini-tasks. Needs a real `owns:` list. Never fixes, never reviews | Own marker. Nearly unlimited |
-| flash (scout) | `gemini-3.8-flash-medium` (`flash-low` = `-low` for pure lookups) | Scouting fallback when the OpenCode `scout` chain is drained. Read-only | Own marker |
-| argon | `gemini-4-argon-medium` (`argon-high` for the hardest, `argon-low` for trivial) | **Hard tasks only.** Fix steps (medium) | Small pool; weekly |
-| sonnet (fix only) | `claude-sonnet-5-5-medium` | Fix steps of the ladders only. Never a first build, review, scout or design | Small pool. Own marker |
-| opus (fix only) | `claude-opus-5-5-medium` | Last agy fix step only | Smallest pool. Own marker |
+| flash-high (build) | `gemini-3.8-flash-high` | **First-choice builder** for any non-design task Opus can split into small, exactly specced mini-tasks. Needs a real `owns:` list. Never fixes, never reviews | Shares the ONE Gemini pool marker with Neon and Carbon |
+| flash (scout) | `gemini-3.8-flash-medium` (`flash-low` = `-low` for pure lookups) | Scouting fallback when the OpenCode `scout` chain is drained. Read-only | Gemini pool |
+| neon | `gemini-4-neon-high` (default; `neon-xhigh` only the hardest, `neon-medium` smaller, `neon-low` trivial) | **Hard tasks only.** Fix steps. AA Nov 2026: xhigh 61, high 60 (about $3.74/task) | Gemini pool |
+| carbon | `gemini-4-carbon-high` (`carbon-medium` also exists; NO low, NO xhigh: carbon-low costs more per task) | Escalation after Neon fails review; long-horizon hard reasoning. High 60 at about $7.76/task, about 2x slower; beats Neon only on Terminal-Bench 4.0. Sparingly | Gemini pool, heavy burn |
+| sonnet (fix only) | `claude-sonnet-5-5-medium` | Fix steps of the ladders only. Never a first build, review, scout or design | Small pool. Own marker (claude pool, separate from Gemini) |
+| opus (fix only) | `claude-opus-5-5-medium` | Last agy fix step only | Smallest pool. Own marker (claude pool) |
 
 agy Sonnet and agy Opus never build first and never review: a reviewer that can edit would change the work after the check.
 

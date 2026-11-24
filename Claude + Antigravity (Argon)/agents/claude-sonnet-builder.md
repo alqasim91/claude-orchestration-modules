@@ -1,6 +1,6 @@
 ---
 name: claude-sonnet-builder
-description: Builder and fixer on the Claude plan (Sonnet, effort high). Builds design shells and first design drafts, applies fix step 2 for work built by Argon, agy Sonnet or agy Opus, and in Claude only mode builds most tasks.
+description: Builder and fixer on the Claude plan (Sonnet, effort high). Builds design shells and first design drafts, applies the Sonnet-high fix step for work built by Argon, Carbon, agy Sonnet or agy Opus, and in Claude only mode builds most tasks.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 effort: high
