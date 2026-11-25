@@ -60,22 +60,26 @@ Print: files created, whether the self-check passed, issues found and fixed, and
 - A plan table is printed first, before any work starts or any file is edited, with a route for every task (sensitive ones labeled `opus-sensitive (reason)`). `scripts/agy-run.sh --status` ran before it.
 - The main chat edits no project files and runs no builds: every edit, even sensitive work, comes from a builder. It only launches builders and scripts, writes files under `.m6/`, and reads short reports.
 - Sensitive means the sensitive files only (migrations, access policies, money or stock functions, auth, crypto) and those go to `claude-opus-builder`; the UI, types and labels of the same feature go through normal routing.
-- The design and styles task went to `claude-sonnet-builder` or `claude-opus-builder`, never to `agy` (not Argon, not Flash). That task owned `.m6/contract.md` and wrote it; mini-task briefs say "Read `.m6/contract.md` first" and do not repeat the names.
-- Parallel tasks were launched together in one message, and no two of them own the same file. Flash and Argon tasks ran as background `scripts/agy-run.sh` calls (no relay sub-agent).
+- The design and styles task went to `claude-sonnet-builder` or `claude-opus-builder`, never to `agy` (not Flash, Neon or Carbon). That task owned `.m6/contract.md` and wrote it; mini-task briefs say "Read `.m6/contract.md` first" and do not repeat the names.
+- Parallel tasks were launched together in one message, and no two of them own the same file. Flash and Neon tasks ran as background `scripts/agy-run.sh` calls (no relay sub-agent).
 - The scout checks (links, accessibility, leftover text) went to Flash, and Opus verified what they reported before anything was changed.
-- The plan shows the Flash test applied to each non-design build task: tasks that split appear as Flash-high tasks with mini-tasks (`-m1`, `-m2`, ... about 4 each, same-file mini-tasks in sequence, briefs that point to the shared contract file). Tasks Opus could not spec exactly appear on Argon (medium by default).
+- The plan shows the Flash test applied to each non-design build task: tasks that split appear as Flash-high tasks with mini-tasks (`-m1`, `-m2`, ... about 4 each, same-file mini-tasks in sequence, briefs that point to the shared contract file). Tasks Opus could not spec exactly appear on Neon (high by default; xhigh only for the hardest). Carbon high appears only for long-horizon hard reasoning, if at all.
 - Every task that edits files got a reviewer sub-agent. Each task was reviewed ONCE, after all its mini-tasks finished, never per mini-task. `sonnet-reviewer` reviewed it with 400 changed lines or fewer (combined diff); `opus-reviewer` (a sub-agent) reviewed it above 400, and the main chat never read a full diff. Flash never reviewed or fixed anything.
-- A failed review of Flash-built work went to Argon medium first (`<task>-r1`, with the whole task diff and defect list), then Claude Sonnet medium (`claude-sonnet-fixer`), then Claude Opus medium, and `.claude/m6/fix-ladders.md` was read first. With Argon drained, it started at Sonnet medium.
-- If more than 1 in 3 Flash-built tasks failed their first review (from the 3rd reviewed task on), the plan says the Flash safety switch tripped and new tasks go to Argon, and `.m6/last-run.md` repeats it.
+- A failed review of Flash-built work went to Neon high first (`<task>-r1`, with the whole task diff and defect list), then Carbon high (`-r2`), then Claude Sonnet medium (`claude-sonnet-fixer`, `-r3`), then Claude Opus medium (`-r4`), and `.claude/m6/fix-ladders.md` was read first. With the Gemini pool drained, it started at Sonnet medium. `carbon-low` and `carbon-xhigh` never appear anywhere.
+- If more than 1 in 3 Flash-built tasks failed their first review (from the 3rd reviewed task on), the plan says the Flash safety switch tripped and new tasks go to Neon high, and `.m6/last-run.md` repeats it.
 - The final message to the user is at most 8 short lines (what was built, what is open, who did the work, what you must decide, "Details: .m6/last-run.md") plus the "Elapsed: Xm Ys" line. The per-wave table is in `.m6/last-run.md`.
 
 ## Optional: test the drained pools
 
-Fake a drained Antigravity before you paste a prompt. In the project folder (Mac, or Git Bash on Windows):
+Fake a drained Antigravity before you paste a prompt. All Gemini models (Flash, Neon, Carbon) share ONE quota, so one marker drains them all. In the project folder (Mac, or Git Bash on Windows):
 
 ```bash
 mkdir -p .claude/agy-quota
-for m in gemini-4-argon-medium gemini-4-argon-high claude-sonnet-5-5-medium claude-opus-5-5-medium; do printf 'until=2099-01-01T00:00:00Z\nreason=test\n' > ".claude/agy-quota/$m"; done
+printf 'until=2099-01-01T00:00:00Z\nreason=test\n' > .claude/agy-quota/gemini-pool
 ```
 
-Then paste Prompt A. `scripts/agy-run.sh --status` should list the four markers. Flash should keep building the pieces it can (the plan still shows Flash-high mini-tasks), and the design shell still goes to a Claude builder. Opus should ask ONE question only if some task cannot be split into exact mini-tasks: "wait for the reset, or switch to Claude only?". It must not pick for you, and it must not ask the old "switch to Flash" question. To test the Flash-built fix ladder with Argon drained, check that a failed Flash-built task skips Argon and starts at `claude-sonnet-fixer`. Delete the marker files when you are done: `rm .claude/agy-quota/*`.
+Then paste Prompt A. `scripts/agy-run.sh --status` should list `gemini-pool`. With the Gemini pool drained, nothing may go to Flash, Neon or Carbon, and no Gemini model may "take over" from another: the design shell still goes to a Claude builder, and the pieces that would have gone to Flash are held. Opus must ask ONE question, in words: "Flash is drained (the whole Gemini pool is). Wait for the reset, or switch to Claude only?". It must not pick for you. To test the fix ladder, check that a failed Flash-built task skips Neon and Carbon and starts at `claude-sonnet-fixer`.
+
+To test the Claude pool as well, add `printf 'until=2099-01-01T00:00:00Z\nreason=test\n' > .claude/agy-quota/claude-pool`: now agy Sonnet and agy Opus are drained too, and Opus asks the question once for everything held.
+
+To test a model-only marker, write `.claude/agy-quota/gemini-4-carbon-high` instead of the pool marker: only Carbon is skipped, Flash and Neon keep working. Delete the marker files when you are done: `rm .claude/agy-quota/*`.

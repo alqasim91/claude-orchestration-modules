@@ -35,8 +35,9 @@ agy
 ```
 agy models
 ```
-Make sure these four are in the list:
+Make sure these five are in the list:
 - `gemini-4-argon-medium`
+- `gemini-4-carbon-high`
 - `gemini-3.8-flash-medium`
 - `claude-sonnet-5-5-medium`
 - `claude-opus-5-5-medium`
@@ -127,7 +128,7 @@ Inside Claude Code, type `/agents`. You should see all 7 agents. Not there? Quit
 ```
 scripts/agy-run.sh --status
 ```
-It should print `agy: 0 models limited`.
+It should print `agy: 0 limits active`.
 
 ## Step 6. Run a test prompt
 1. Open `claude-antigravity-argon/test-prompt.md`.
@@ -149,11 +150,12 @@ Claude keeps its working files in `.m6/` in your project (hidden from git): `bri
 |---|---|
 | **Opus** (your Claude session) | The boss. Only plans and judges: launches sub-agents, reads their short reports, and never edits files, runs builds or reads a full diff. |
 | **Argon** (`gemini-4-argon-medium`) | The builder. Default for bulk code, tests, refactors. Runs on Antigravity. |
-| **Sonnet / Opus via agy** | Specialists for non-design builds. Sonnet for careful edits and docs. Opus for hard multi-file work. Small pools. |
-| **Flash** (`gemini-3.8-flash-medium`) | The scout. Read-only: lookups, summaries, checks. Nearly unlimited. Builds small pieces too, but only on the Flash route. |
+| **Carbon** (`gemini-4-carbon-high`) | The escalation step. Hard reasoning, and the second try when an Argon high task fails review. About 2x slower and burns quota faster than Argon, so use sparingly. Only medium and high exist (never low). |
+| **Sonnet / Opus via agy** | Specialists for non-design builds. Sonnet for careful edits and docs. Opus for hard multi-file work. They share the Claude pool in agy. |
+| **Flash** (`gemini-3.8-flash-medium`) | The scout. Read-only: lookups, summaries, checks. Shares the one Gemini quota pool with Argon and Carbon. Builds small pieces too, but only on the Flash route. |
 | **`scripts/agy-run.sh`** | The runner script. Sends one task to one Antigravity model, walks the fallback chain if a model is drained, and reports what changed. Design never goes through it. |
-| **`claude-sonnet-builder`** | Design shells and first drafts (Sonnet high). Fix step 2 for work Argon, agy Sonnet or agy Opus built. |
-| **`claude-opus-builder`** | Sensitive work (migrations, access policies, money and stock functions, auth, crypto) and the most important designs (Opus medium). Fix step 3 for agy-built work, and step 2 for Flash-built work. |
+| **`claude-sonnet-builder`** | Design shells and first drafts (Sonnet high). The Sonnet-high fix step for work Argon, Carbon, agy Sonnet or agy Opus built. |
+| **`claude-opus-builder`** | Sensitive work (migrations, access policies, money and stock functions, auth, crypto) and the most important designs (Opus medium). The last fix step for agy-built work, and step 2 for Flash-built work. |
 | **`claude-sonnet-fixer`** | Fix step 1 for Flash-built work (Sonnet medium). Fixes only. |
 | **`sonnet-reviewer`** | Reads one task's diff of 400 changed lines or fewer. Returns PASS or FAIL. |
 | **`opus-reviewer`** | Reads one task's diff of more than 400 changed lines (Opus medium). Returns PASS or FAIL. |
@@ -191,25 +193,26 @@ Opus counts the changed lines of the task (added plus removed, plus new files).
 Same rule for every builder, `claude-opus-builder` included. The main chat never reads the full diff, only the verdict. If a fix pushes a task over 400, the next review moves up to `opus-reviewer`.
 
 ## When a review fails
-Up to 3 steps. Who fixes depends on who built it.
+Up to 3 steps (4 for Argon-built). Who fixes depends on who built it.
 
-| Built by | Step 1 | Step 2 | Step 3 |
-|---|---|---|---|
-| Argon, agy Sonnet or agy Opus | the same model | `claude-sonnet-builder` (Sonnet high) | `claude-opus-builder` (Opus medium) |
-| Flash | `claude-sonnet-fixer` (Sonnet medium) | `claude-opus-builder` (Opus medium) | record and continue |
-| `claude-sonnet-builder` (design) | the same agent | `claude-opus-builder` | record and continue |
-| `claude-opus-builder` (design or sensitive) | the same agent | record and continue | - |
-| `claude-haiku-builder` (tiny edit) | the same agent | `claude-sonnet-builder` | `claude-opus-builder` |
+| Built by | Step 1 | Step 2 | Step 3 | Step 4 |
+|---|---|---|---|---|
+| Argon | the same model | Carbon high | `claude-sonnet-builder` (Sonnet high) | `claude-opus-builder` (Opus medium) |
+| Carbon, agy Sonnet or agy Opus | the same model | `claude-sonnet-builder` (Sonnet high) | `claude-opus-builder` (Opus medium) | - |
+| Flash | `claude-sonnet-fixer` (Sonnet medium) | `claude-opus-builder` (Opus medium) | record and continue | - |
+| `claude-sonnet-builder` (design) | the same agent | `claude-opus-builder` | record and continue | - |
+| `claude-opus-builder` (design or sensitive) | the same agent | record and continue | - | - |
+| `claude-haiku-builder` (tiny edit) | the same agent | `claude-sonnet-builder` | `claude-opus-builder` | - |
 
-- Original Antigravity model drained? Skip straight to the Claude steps.
+- A step's Antigravity model drained? Skip it. All Gemini models share one quota pool, so a drained Argon means Carbon is drained too: go straight to the Claude steps.
 - Flash never fixes and never reviews.
 - Still failing after the last step? It goes in the final summary and the build keeps going.
 
 ## When quota runs out
-- A drained model gets a marker file in `.claude/agy-quota/` (an end time and a reason). The script skips it until that time, or for 6 hours when the error gives no time. Delete a marker to clear it. `scripts/agy-run.sh --status` lists the active ones.
-- The script moves a build to the next Antigravity builder itself, at most 2 times: Argon, then Sonnet, then Opus. Fix rounds never move to another model.
-- **All three builders drained?** Opus stops, lets the running reviews finish, and asks you ONE question. It never switches on its own.
-  - If the rest of the work can be cut into small pieces that Flash can build reliably (4 per task by default), it asks: **"a) switch to Flash, or b) switch to Claude only?"**
+- Quota is two pools: every Gemini model (Argon, Carbon, Flash, Neon...) shares one, and the Claude models in agy share the other. A drain writes one marker for the pool, `.claude/agy-quota/gemini-pool` or `claude-pool` (an end time and a reason). A "not available to this account" error marks only that model. The script skips a marker until that time, or for 6 hours when the error gives no time. Delete a marker to clear it. `scripts/agy-run.sh --status` lists the active ones.
+- The script moves a build to the next Antigravity builder itself, at most 2 times: Argon (or Carbon), then Sonnet, then Opus. There is no Gemini fallback, since all Gemini models share one quota. Fix rounds never move to another model.
+- **Both pools drained?** Opus stops, lets the running reviews finish, and asks you ONE question. It never switches on its own.
+  - If Flash is usable (its Gemini pool is not drained) and the rest of the work can be cut into small pieces it can build reliably (4 per task by default), it asks: **"a) switch to Flash, or b) switch to Claude only?"**
   - If not, it asks: **"wait for the reset, or switch to Claude only?"**
 - **a) Flash route.** Every remaining task is cut into mini-tasks and Flash builds them all. Each task is reviewed ONCE, after all its mini-tasks are done, with the same 400-line rule on the combined diff. Fixes go to `claude-sonnet-fixer`, then `claude-opus-builder`.
 - **b) Claude only mode.** Claude builds the rest, with no Antigravity. Opus scores each task, then picks `claude-haiku-builder` (easy), `claude-sonnet-builder` (normal and design) or `claude-opus-builder` (hardest). Read-only work goes to `scout`. Reviews use the same 400-line rule.
@@ -217,7 +220,7 @@ Up to 3 steps. Who fixes depends on who built it.
 # Part 3: Good to know
 
 - **Parallel runs drain quota faster.** Several models spend your Google quota at once. Prefer fewer, bigger tasks.
-- **Default caps:** 4 tasks total (argon 2, flash 3, agy sonnet 1, agy opus 1). A running script call counts against its model. Claude subagent runs count toward the total only. Edit the caps table in `CLAUDE.md`.
+- **Default caps:** 4 tasks total (argon and carbon 2 together, flash 3, agy sonnet 1, agy opus 1). A running script call counts against its model. Claude subagent runs count toward the total only. Edit the caps table in `CLAUDE.md`.
 - **Design, sensitive builds, reviews and fixes use your Claude plan**, not Google quota. Watch your Claude usage too.
 - **Review every diff.** File ownership is enforced by instructions, not the filesystem. Fallbacks can switch models mid-task. Headless `agy` cannot run shell commands, so it cannot run tests itself; the reviewers run the read-only checks.
 - **Unverified:** whether `agy` allows concurrent sessions, the real quota error text, whether the `effort` setting in the Claude agent files is honored, and whether the runner script works on Windows (it is a bash script: Claude Code runs it through Git Bash, so install Git for Windows).

@@ -9,19 +9,22 @@
 # The brief file is body-only (.m6/briefs/<task>.md). The script adds task:, owns:, "Read AGENTS.md first and
 # follow it.", the read-only line and the no-shell line. A design task must never be sent here (CLAUDE.md rule;
 # the script also refuses a brief whose first line is the bare word "design").
-# --model missing = argon. --task missing = a generated slug (said in the report). --owns missing = the run
+# --model missing = neon (high). --task missing = a generated slug (said in the report). --owns missing = the run
 # goes ahead unscoped and the report says so (a Flash call without --owns is a read-only scout).
 #
 # Exit codes:
 #   0 success (report printed)
 #   1 other error: login, crash, timeout, unknown flag (last 20 log lines printed). No fallback
-#   2 agy missing, bad arguments, refused (design, Flash fix), or every model unavailable / not in `agy models`
+#   2 agy missing, bad arguments, refused (design, Flash fix, carbon-low/xhigh, bad effort), or every model unavailable / not in `agy models`
 #   3 drained. First line "drained: <model-id>, no fallback" (--no-fallback or a Flash build) or
 #     "drained: all models drained or unavailable (tried: ...)" when the chain is used up, or
 #     "drained: max fallbacks reached ..." Owned files may be partly edited (the report shows them)
 #   4 suspected concurrency limit: first line "concurrency: <quoted text>". No marker, no fallback
 #
-# Markers: .claude/agy-quota/<model-id>, two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
+# Markers (.claude/agy-quota/<name>), two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
+# Quota pools: ALL gemini-* models (Flash, Neon, Carbon) share ONE pool -> marker `gemini-pool`; all claude-* models
+# on agy (Sonnet, Opus) share another -> marker `claude-pool`. A model is skipped when its pool marker OR a marker
+# named after the model id is active. A "not available to" error marks only that model, by its id.
 # until = the reset time parsed from the output, else now + 6 hours (a guess: agy reset times are unpublished).
 # Legacy markers (one line, a bare ISO time) count as active for 6 hours from that time.
 # With --status: prints active markers and "agy: N models limited". Always exit 0.
@@ -54,33 +57,53 @@ DAY=86400
 RUN_TIMEOUT="${AGY_RUN_TIMEOUT:-1800}"   # seconds per run; 0 = off. Needs `timeout` (or `gtimeout` on macOS)
 MAX_FALLBACKS="${AGY_MAX_FALLBACKS:-2}"  # max fallbacks per task (a skipped or drained model counts as one)
 QUOTA_RE='rate.?limit|429|quota|usage limit|limit reached|exhausted|too many requests|try again later|FreeUsageLimit|resource_exhausted|not available to'
+NA_RE='not available to'            # a model-only error: marks that model by name, not its pool
 CONC_RE='concurrent|too many sessions|another session|already running|locked'
 
 # ================= ALIASES, EFFORT SUFFIX, CHAINS (edit together with CLAUDE.md) =================
-# Alias -> agy model id. A -low / -medium / -high suffix on the alias picks the effort (default medium):
-#   argon -> gemini-4-argon-<effort>   sonnet -> claude-sonnet-5-5-<effort>   opus -> claude-opus-5-5-<effort>
-#   flash -> gemini-3.8-flash-<effort> (scouting; a Flash BUILD is always gemini-3.8-flash-high, see below)
+# Alias -> agy model id. A -low / -medium / -high / -xhigh suffix on the alias picks the effort. Default effort:
+# neon and carbon high, everything else medium.
+#   neon   -> gemini-4-neon-<low|medium|high|xhigh>   (high default; xhigh only for the hardest)
+#   carbon -> gemini-4-carbon-<medium|high>           (ONLY these two: carbon-low and carbon-xhigh are refused;
+#                                                      carbon-low costs more per task than higher efforts)
+#   sonnet -> claude-sonnet-5-5-<low|medium|high>   opus -> claude-opus-5-5-<low|medium|high>
+#   flash  -> gemini-3.8-flash-<low|medium|high> (scouting; a Flash BUILD is always gemini-3.8-flash-high, see below)
 # A full model id is used as given (no chain, except that a known family id behaves like its alias).
 alias_family() {   # $1 alias word (no suffix); prints the family or returns 1
-  case "$1" in flash|argon|sonnet|opus) echo "$1" ;; *) return 1 ;; esac
+  case "$1" in flash|neon|carbon|sonnet|opus) echo "$1" ;; *) return 1 ;; esac
+}
+default_effort() { case "$1" in neon|carbon) echo high ;; *) echo medium ;; esac; }   # $1 family
+effort_ok() {      # $1 family  $2 effort: returns 0 when that id exists for the family
+  case "$1:$2" in
+    neon:low|neon:medium|neon:high|neon:xhigh) return 0 ;;
+    carbon:medium|carbon:high) return 0 ;;
+    flash:low|flash:medium|flash:high) return 0 ;;
+    sonnet:low|sonnet:medium|sonnet:high|opus:low|opus:medium|opus:high) return 0 ;;
+  esac
+  return 1
 }
 family_id() {      # $1 family  $2 effort
   case "$1" in
     flash)  echo "gemini-3.8-flash-$2" ;;
-    argon)  echo "gemini-4-argon-$2" ;;
+    neon)   echo "gemini-4-neon-$2" ;;
+    carbon) echo "gemini-4-carbon-$2" ;;
     sonnet) echo "claude-sonnet-5-5-$2" ;;
     opus)   echo "claude-opus-5-5-$2" ;;
   esac
 }
+pool_of() {        # $1 model id: the quota-marker name of its pool
+  case "$1" in gemini-*) echo gemini-pool ;; claude-*) echo claude-pool ;; *) echo "$1" ;; esac
+}
 # Fallback chain after the first choice, builders only. Tokens are alias[-effort]. Never a Claude (non-agy) model.
-#   argon -> sonnet -> opus.  sonnet -> argon -> opus.  opus -> sonnet -> argon-high.
-#   A read-only Flash scout: flash -> argon-low -> stop.  A Flash build has no chain (and never falls back).
+# No chain ever names another Gemini model: Flash, Neon and Carbon share one pool, so a Gemini fallback is meaningless.
+#   neon -> sonnet -> opus.  carbon -> sonnet -> opus.  sonnet -> neon -> opus.  opus -> sonnet -> neon-high.
+#   A read-only Flash scout and a Flash build have no chain (and never fall back).
 chain_after() {    # $1 family  $2 readonly(0|1)
   case "$1:$2" in
-    argon:*)   echo "sonnet opus" ;;
-    sonnet:*)  echo "argon opus" ;;
-    opus:*)    echo "sonnet argon-high" ;;
-    flash:1)   echo "argon-low" ;;
+    neon:*)    echo "sonnet opus" ;;
+    carbon:*)  echo "sonnet opus" ;;
+    sonnet:*)  echo "neon opus" ;;
+    opus:*)    echo "sonnet neon-high" ;;
     *)         echo "" ;;
   esac
 }
@@ -120,6 +143,15 @@ marker_until() {    # prints the until time (UTC ISO) if the model's marker is a
   return 0
 }
 
+active_marker() {   # $1 model id: prints "<marker name> <until>" for its pool marker or its own marker, if active
+  local n u
+  for n in "$(pool_of "$1")" "$1"; do
+    u=$(marker_until "$n")
+    if [ -n "$u" ]; then echo "$n $u"; return 0; fi
+  done
+  return 0
+}
+
 if [ "${1:-}" = "--status" ]; then
   mkdir -p "$QDIR"
   n=0; now=$(date +%s)
@@ -156,7 +188,7 @@ done
 [ -f "$BRIEF" ] || die "brief not found: $BRIEF"
 NOTES=""   # extra report lines (defaults applied, forced settings)
 note() { NOTES="${NOTES}$*"$'\n'; }
-[ -n "$MODEL" ] || MODEL="argon"
+[ -n "$MODEL" ] || MODEL="neon"
 if [ -z "$TASK" ]; then TASK="t-$(date +%s)-$$"; note "task slug missing: generated $TASK"; fi
 [[ "$TASK" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "bad --task slug (use lowercase letters, digits, dashes): $TASK"
 [ -z "$OWNS" ] && OWNS_SET=0
@@ -169,21 +201,26 @@ first_line=$(grep -m1 -v '^[[:space:]]*$' "$BRIEF" | tr -d '\r[:space:]' || true
 FAMILY="" EFFORT="" ID=""
 _a="$MODEL"; _e=""
 case "$_a" in
+  *-xhigh)  _e=xhigh;  _a="${_a%-xhigh}" ;;
   *-low)    _e=low;    _a="${_a%-low}" ;;
   *-medium) _e=medium; _a="${_a%-medium}" ;;
   *-high)   _e=high;   _a="${_a%-high}" ;;
 esac
 if FAMILY=$(alias_family "$_a"); then
-  EFFORT="${_e:-medium}"
+  EFFORT="${_e:-$(default_effort "$FAMILY")}"
   ID=$(family_id "$FAMILY" "$EFFORT")
 else
   FAMILY=""; ID="$MODEL"             # full id, used as given
   case "$ID" in
     gemini-3.8-flash-*)    FAMILY=flash;  EFFORT="${ID##*-}" ;;
-    gemini-4-argon-*)      FAMILY=argon;  EFFORT="${ID##*-}" ;;
+    gemini-4-neon-*)       FAMILY=neon;   EFFORT="${ID##*-}" ;;
+    gemini-4-carbon-*)     FAMILY=carbon; EFFORT="${ID##*-}" ;;
     claude-sonnet-5-5-*)   FAMILY=sonnet; EFFORT="${ID##*-}" ;;
     claude-opus-5-5-*)     FAMILY=opus;   EFFORT="${ID##*-}" ;;
   esac
+fi
+if [ -n "$FAMILY" ] && ! effort_ok "$FAMILY" "$EFFORT"; then
+  die "refused: no such effort for $FAMILY: $EFFORT (carbon is medium or high only, never low or xhigh; xhigh exists for neon only)"
 fi
 
 # ---- Owned pathspecs ----
@@ -236,11 +273,12 @@ if [ $NOFB -eq 0 ] && [ -n "$FAMILY" ]; then
   for tok in $(chain_after "$FAMILY" "$READONLY"); do
     _t="$tok"; _te=""
     case "$_t" in
+      *-xhigh)  _te=xhigh;  _t="${_t%-xhigh}" ;;
       *-low)    _te=low;    _t="${_t%-low}" ;;
       *-medium) _te=medium; _t="${_t%-medium}" ;;
       *-high)   _te=high;   _t="${_t%-high}" ;;
     esac
-    QUEUE+=("$(family_id "$_t" "${_te:-medium}")")
+    QUEUE+=("$(family_id "$_t" "${_te:-$(default_effort "$_t")}")")
   done
 fi
 
@@ -362,15 +400,16 @@ while [ $idx -lt $total ]; do
     if [ $NOFB -eq 1 ]; then die "unavailable: $MODEL ($cid not in agy models), no fallback"; fi
     reason="unavailable: $cid not in agy models"
   else
-    u=$(marker_until "$cid")
-    if [ -n "$u" ]; then
+    hit=$(active_marker "$cid")
+    if [ -n "$hit" ]; then
+      mname=${hit%% *}; u=${hit#* }
       unavailable_only=0
       if [ $NOFB -eq 1 ]; then
         echo "drained: $cid, no fallback"
-        echo "until: $u (skipped: marker, agy was not run)"
+        echo "until: $u (skipped: marker $mname, agy was not run)"
         exit 3
       fi
-      reason="skipped: marker on $cid (until $u)"
+      reason="skipped: marker $mname on $cid (until $u)"
     fi
   fi
 
@@ -425,10 +464,12 @@ while [ $idx -lt $total ]; do
       now=$(date +%s)
       reset=$(parse_reset "$LOG")
       until_e=$((now + LIMIT_DEFAULT)); [ -n "$reset" ] && until_e=$reset   # 6h default is a guess
-      write_marker "$cid" "$until_e" "$qline"
+      mk=$(pool_of "$cid")                                  # pool marker, unless the error names only this model
+      if printf '%s' "$qline" | grep -Eqi "$NA_RE"; then mk="$cid"; fi
+      write_marker "$mk" "$until_e" "$qline"
       if [ $NOFB -eq 1 ]; then
         echo "drained: $cid, no fallback"
-        echo "until: $(to_iso "$until_e")"
+        echo "until: $(to_iso "$until_e") (marker $mk)"
         echo "error: $qline"
         report "none (drained)"
         exit 3

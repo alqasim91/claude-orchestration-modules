@@ -1,6 +1,6 @@
 ---
 name: claude-sonnet-fixer
-description: Fixer on the Claude plan (Sonnet, effort medium). Applies a defect list to work that Flash built (fix step 2 of the Flash-built ladder, after Argon medium; step 1 when Argon is drained). Fixes only; never builds new work and never a relay.
+description: Fixer on the Claude plan (Sonnet, effort medium). Applies a defect list to work that Flash built (fix step 3 of the Flash-built ladder, after Neon and Carbon high; the first step when the Gemini pool is drained). Fixes only; never builds new work and never a relay.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 effort: medium

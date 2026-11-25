@@ -15,9 +15,9 @@ You are setting up Claude + Antigravity (Argon) (Claude Code + Antigravity) for 
 - "could not make the first commit": ask for a name and email, then run `git config user.name "<name>"` and `git config user.email "<email>"` (no `--global`) and `git add -A -- . ':(exclude,glob)**/.env*' && git commit -q -m start`.
 
 5. Outside tools. For each tool below, run `command -v <tool>`. Missing: say in one sentence what it is, ask "May I install it?". Yes: run the install command. No: give them the command, go on. Still missing: suggest a restart. Installed: run its check, 20 second timeout. You cannot sign in for the user (it opens a browser): if the check fails, hangs or lacks the models, give them the terminal steps and go on.
-- `agy`: Google's Antigravity, a builder. Needs a Google AI Pro plan. Install: Mac/Linux `curl -fsSL https://antigravity.google/cli/install.sh | bash`; Windows `powershell -c "irm https://antigravity.google/cli/install.ps1 | iex"`. Check: `agy models`, listing gemini-4-argon-medium, gemini-3.8-flash-medium, claude-sonnet-5-5-medium, claude-opus-5-5-medium. Sign-in (user, in a terminal): `agy`, choose Google OAuth, sign in with the AI Pro account, quit, `agy models`.
+- `agy`: Google's Antigravity, a builder. Needs a Google AI Pro plan. Install: Mac/Linux `curl -fsSL https://antigravity.google/cli/install.sh | bash`; Windows `powershell -c "irm https://antigravity.google/cli/install.ps1 | iex"`. Check: `agy models`, listing gemini-4-argon-medium, gemini-4-carbon-high, gemini-3.8-flash-medium, claude-sonnet-5-5-medium, claude-opus-5-5-medium. Sign-in (user, in a terminal): `agy`, choose Google OAuth, sign in with the AI Pro account, quit, `agy models`.
 
-6. Check. Run `scripts/agy-run.sh --status` (expect `agy: 0 models limited`). `ls .claude/agents | wc -l` (7+) and `ls .claude/m6 | wc -l` (3+). Report in one line.
+6. Check. Run `scripts/agy-run.sh --status` (expect `agy: 0 limits active`). `ls .claude/agents | wc -l` (7+) and `ls .claude/m6 | wc -l` (3+). Report in one line.
 
 7. Finish in at most 6 short lines: what is installed; what is left (sign-ins, rules to paste); START A NEW Claude Code session here (rules load at session start) and choose Opus; then they can paste a request or a test prompt from `claude-antigravity-argon/test-prompt.md`; the `claude-antigravity-argon` folder and zip can stay or go.
 

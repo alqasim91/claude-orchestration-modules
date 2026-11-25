@@ -23,10 +23,13 @@
 #     partly edited
 #   4 suspected concurrency limit: first line "concurrency: <quoted text>". No marker, no fallback
 #
-# Markers: .claude/agy-quota/<model-id>, two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
+# Markers: .claude/agy-quota/<key>, two lines: until=<UTC ISO>, reason=<line>. Active while now < until.
+# Keys: every gemini-* model shares ONE pool, so one marker "gemini-pool" (a drain on one = all drained).
+# Claude models in agy are a separate pool: marker "claude-pool". A "not available to this account/plan"
+# error marks only that model, under its own id.
 # until = the reset time parsed from the output, else now + 6 hours (a guess: agy reset times are unpublished).
 # Legacy markers (one line, a bare ISO time) count as active for 6 hours from that time.
-# With --status: prints active markers and "agy: N models limited". Always exit 0.
+# With --status: prints active markers and "agy: N limits active". Always exit 0.
 #
 # Limit rules. rc != 0: any QUOTA_RE match in the log = limit hit. rc == 0: a limit only when a short log
 # (under 40 lines) has a matching line that also contains "error" AND the owned files did not gain changed
@@ -63,15 +66,23 @@ CONC_RE='concurrent|too many sessions|another session|already running|locked'
 #   alias    -> agy model id (medium effort by default; a -low / -medium / -high suffix on the alias picks
 #               that effort, e.g. sonnet-high -> claude-sonnet-5-5-high; a full model id is used as given)
 #   argon    -> gemini-4-argon-<effort>        sonnet -> claude-sonnet-5-5-<effort>
-#   opus     -> claude-opus-5-5-<effort>       flash  -> gemini-3.8-flash-<effort>
-# Chains (builders): argon -> sonnet -> opus.  sonnet -> argon -> opus.  opus -> sonnet -> argon-high.
+#   carbon   -> gemini-4-carbon-<effort>       opus   -> claude-opus-5-5-<effort>
+#   flash    -> gemini-3.8-flash-<effort>
+#   Carbon has ONLY medium and high (no low, no xhigh: carbon-low costs more per task than higher efforts).
+#   Escalation tool: carbon-high for hard reasoning and the second try after an Argon high task fails review.
+#   Slower and burns quota faster: use sparingly.
+# Pools: all gemini-* models (Argon, Carbon, Flash, ...) share ONE quota, so there is no Gemini fallback.
+#   Claude models in agy are a second pool. Chains therefore only step across pools.
+# Chains (builders): argon -> sonnet -> opus.  carbon -> sonnet -> opus.  sonnet -> argon -> opus.
+#   opus -> sonnet -> argon-high. (A step into a drained pool is skipped by its marker.)
 #   Only the FIRST model takes the requested effort; later models are the ids written below.
-#   Read-only Flash scout: flash -> argon-low -> stop.  A Flash build has no chain.
+#   Read-only Flash scout and any Flash build: no chain (same pool as Argon, so nothing to fall back to).
 #   Never walk to a Claude-plan model: Claude work is the main session's call.
 # =====================================================================================================
 alias_prefix() {   # prints the model id prefix for an alias base, or returns 1
   case "$1" in
     argon)  echo "gemini-4-argon-" ;;
+    carbon) echo "gemini-4-carbon-" ;;
     sonnet) echo "claude-sonnet-5-5-" ;;
     opus)   echo "claude-opus-5-5-" ;;
     flash)  echo "gemini-3.8-flash-" ;;
@@ -81,6 +92,7 @@ alias_prefix() {   # prints the model id prefix for an alias base, or returns 1
 family_of_id() {   # prints the chain family of a model id, or "other"
   case "$1" in
     gemini-4-argon-*)     echo argon ;;
+    gemini-4-carbon-*)    echo carbon ;;
     claude-sonnet-5-5-*)  echo sonnet ;;
     claude-opus-5-5-*)    echo opus ;;
     gemini-3.8-flash-*)   echo flash ;;
@@ -90,9 +102,10 @@ family_of_id() {   # prints the chain family of a model id, or "other"
 chain_for() {      # $1 family  $2 requested id  $3 read-only (1/0). Prints the chain, one model id per line
   case "$1" in
     argon)  echo "$2"; echo "claude-sonnet-5-5-medium"; echo "claude-opus-5-5-medium" ;;
+    carbon) echo "$2"; echo "claude-sonnet-5-5-medium"; echo "claude-opus-5-5-medium" ;;
     sonnet) echo "$2"; echo "gemini-4-argon-medium"; echo "claude-opus-5-5-medium" ;;
     opus)   echo "$2"; echo "claude-sonnet-5-5-medium"; echo "gemini-4-argon-high" ;;
-    flash)  echo "$2"; if [ "$3" = 1 ]; then echo "gemini-4-argon-low"; fi ;;
+    flash)  echo "$2" ;;
     *)      echo "$2" ;;
   esac
 }
@@ -105,6 +118,13 @@ resolve_model() {  # $1 alias[-effort] or full id. Prints the model id
     *)        base="$m" ;;
   esac
   if p=$(alias_prefix "$base"); then echo "${p}${eff}"; else echo "$m"; fi
+}
+pool_key() {       # marker key shared by a model id's pool: gemini-pool, claude-pool, else the id itself
+  case "$1" in
+    gemini-*) echo "gemini-pool" ;;
+    claude-*) echo "claude-pool" ;;
+    *)        echo "$1" ;;
+  esac
 }
 # ======================================== end of MODEL TABLE =========================================
 
@@ -156,7 +176,7 @@ if [ "${1:-}" = "--status" ]; then
     [ -n "$why" ] || why="legacy marker"
     echo "  $id limited until $u (remaining $(fmt_remaining $(( $(to_epoch "$u") - now )))). reason: $why"
   done
-  echo "agy: $n models limited"
+  echo "agy: $n limits active"
   exit 0
 fi
 
@@ -194,6 +214,7 @@ fi
 
 # ---- Model, family, chain ----
 REQID=$(resolve_model "$MODEL")
+case "$REQID" in gemini-4-carbon-low|gemini-4-carbon-xhigh) die "Carbon has only medium and high (no low, no xhigh): $REQID" ;; esac
 FAMILY=$(family_of_id "$REQID")
 # A Flash build (Flash with a real --owns list, a mini-task) always runs in no-fallback mode.
 if [ "$FAMILY" = "flash" ] && [ $READONLY -eq 0 ]; then NOFB=1; fi
@@ -349,8 +370,9 @@ while :; do
     prev="$ID"; prev_why="skipped: not in agy models"; idx=$((idx + 1)); continue
   fi
 
-  # skip: active marker
-  u=$(marker_until "$ID")
+  # skip: active marker (the model's pool marker, or its own marker from a "not available" error)
+  u=$(marker_until "$(pool_key "$ID")")
+  [ -n "$u" ] || u=$(marker_until "$ID")
   if [ -n "$u" ]; then
     ANY_DRAINED=1
     if [ $NOFB -eq 1 ]; then
@@ -407,7 +429,9 @@ while :; do
     now=$(date +%s)
     reset=$(parse_reset "$LOG")
     until_e=$((now + LIMIT_DEFAULT)); [ -n "$reset" ] && until_e=$reset   # 6h default is a guess
-    write_marker "$ID" "$until_e" "$qline"
+    mkey=$(pool_key "$ID")
+    if printf '%s\n' "$qline" | grep -Eiq 'not available to'; then mkey="$ID"; fi   # plan/account error: this model only
+    write_marker "$mkey" "$until_e" "$qline"
     if [ $NOFB -eq 1 ]; then
       echo "drained: $ID, no fallback (until $(to_iso "$until_e"))"
       echo "error text: $qline"

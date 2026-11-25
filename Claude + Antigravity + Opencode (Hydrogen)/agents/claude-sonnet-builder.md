@@ -1,6 +1,6 @@
 ---
 name: claude-sonnet-builder
-description: Builder and fixer on the Claude plan (Sonnet, effort high). Builds design shells and first design drafts, stands in for a drained agy Sonnet fix step (Neon-, Argon- and OpenCode-built work), fixes large/vision/av work, and in Claude only mode builds most tasks. Hydrogen-built work goes to claude-sonnet-fixer instead.
+description: Builder and fixer on the Claude plan (Sonnet, effort high). Builds design shells and first design drafts, stands in for a drained agy Sonnet fix step (Neon-, Carbon- and OpenCode-built work), fixes large/vision/av work, and in Claude only mode builds most tasks. Hydrogen-built work goes to claude-sonnet-fixer instead.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 effort: high

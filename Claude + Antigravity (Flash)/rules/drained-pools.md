@@ -1,21 +1,21 @@
 Read this as soon as any task is held, Flash or an agy pool is drained (marker or `agy-run.sh` exit 3), or the user mentions Claude only. Self-contained. Cross-rules: Claude only never without the user's answer; the main session never implements.
 
-# When the agy pools are drained
-Applies when Argon, agy Sonnet and agy Opus are all drained (every builder chain exhausted: a build returned `drained: all models drained or unavailable`, or the fresh markers cover argon, sonnet and opus). Flash does not stop: it is the normal builder. Flash has its own markers (`gemini-3.8-flash-high` for builds, `gemini-3.8-flash-medium` for scouting); a drained Flash does not mean the agy pools are drained, and the other way round.
-1. Stop launching agy builds on Argon, agy Sonnet and agy Opus. Let running tasks finish and review them. Design tasks, Flash builds and Claude-plan fix steps do not need those pools, so they keep running as planned.
-2. **Flash keeps building what can be split.** Tasks that pass the Flash test continue on Flash high as usual (unless the safety switch tripped or Flash itself is drained, see below).
-3. **Tasks that cannot be split** (they fail the Flash test, so they would have gone to Argon, agy Sonnet or agy Opus) are held. Do not start a wave that depends on them. When everything that can run has run and been reviewed, stop and ask the user ONE question, in words (no decision box), then wait:
-   "Antigravity is drained for Argon, Sonnet and Opus (marker times: <times>). Some remaining tasks cannot be split into exact Flash mini-tasks. Wait for the reset, or switch to Claude only?"
-4. Do nothing on those held tasks (no Claude builds either) until the user answers. Reset times are unpublished: a marker past its `until` time counts as cleared (the default `until` is a 6-hour guess).
-   - Wait -> stop. On the next run, re-check the markers (`scripts/agy-run.sh --status`); if the pools are still drained, ask again.
+# When an agy pool is drained
+There are exactly two agy pools. The **Gemini pool** (Flash, Neon, Carbon: all share one quota, marker `gemini-pool`) and the **agy Claude pool** (agy Sonnet, agy Opus; marker `claude-pool`). A "not available" error marks only that model, by its id. Gemini drained = Flash, Neon and Carbon are all drained at once: **there is no Gemini fallback**, so nothing ever "falls back to" another Gemini model. Detect it with a fresh `gemini-pool` marker (`scripts/agy-run.sh --status`) or exit 3 `drained: gemini-...`.
+1. Stop launching on a drained pool. Let running tasks finish and review them. Design tasks and Claude-plan fix steps do not need the agy pools, so they keep running as planned.
+2. **Gemini drained, Claude pool free.** Neon and Carbon builds chain by themselves to agy Sonnet, then agy Opus (the script does it). **Flash pieces cannot start** (a Flash build never falls back): hold them and ask the question in step 4. A Flash scout whose pool is drained: stop and tell the user. Fix steps skip every Gemini step (`fix-ladders.md`).
+3. **Claude pool drained, Gemini free.** Flash and Neon keep building as usual; agy Sonnet or agy Opus tasks chain to Neon by themselves. Nothing to ask.
+4. **Both drained, or Gemini drained with Flash pieces held.** Run what can still run (design, Claude-plan fixes, reviews). Do not start a wave that depends on held tasks. When everything that can run has run and been reviewed, stop and ask the user ONE question, in words (no decision box), then wait:
+   "The Gemini pool (Flash, Neon, Carbon) is drained (marker times: <times>)[ and so is agy Sonnet and Opus]. Some remaining tasks cannot run without it. Wait for the reset, or switch to Claude only?"
+   Do nothing on the held tasks (no Claude builds either) until the user answers. Reset times are unpublished: a marker past its `until` time counts as cleared (the default `until` is a 6-hour guess).
+   - Wait -> stop. On the next run, re-check the markers (`scripts/agy-run.sh --status`); if still drained, ask again.
    - Claude only -> Claude only mode for the held tasks (see below).
    - An answer given in the original prompt ("wait", "use Claude only") counts as the user's answer.
-5. **Flash drained while building** (fresh `gemini-3.8-flash-high` marker, or exit 3 `drained: gemini-3.8-flash-high, no fallback`): stop and ask "Flash is drained. Wait for the reset, or switch to Claude only?" (same answers as above). Do not move the pieces to Argon on your own.
-6. If the safety switch tripped AND the agy pools are drained, all remaining non-design builds are held: ask the question in step 3.
-A read-only Flash scout whose chain ends (`flash -> argon-low`, both drained): stop and tell the user.
+5. **Flash drained while building** (fresh `gemini-pool` marker, a `gemini-3.8-flash-high` marker, or exit 3 `drained: gemini-3.8-flash-high, no fallback`): stop and ask "Flash is drained (the whole Gemini pool is). Wait for the reset, or switch to Claude only?" (same answers). Never move the pieces to Neon or Carbon on your own: they are the same pool.
+6. If the safety switch tripped AND Gemini is drained, new tasks go to agy Sonnet or Opus when the Claude pool is free; if it is drained too, all remaining non-design builds are held: ask the question in step 4.
 
 # Claude only mode (only after the user answered "switch to Claude only")
-Claude-only building with Claude builder subagents. No agy at all for the remaining tasks, including Flash. Tasks already built and accepted on Flash or Argon stay as they are. Score every remaining build task 0 / 1 / 2 on each dimension (takes 10 seconds):
+Claude-only building with Claude builder subagents. No agy at all for the remaining tasks, including Flash. Tasks already built and accepted on Flash, Neon or Carbon stay as they are. Score every remaining build task 0 / 1 / 2 on each dimension (takes 10 seconds):
 
 | | 0 | 1 | 2 |
 |---|---|---|---|
