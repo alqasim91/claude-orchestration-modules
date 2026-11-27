@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scripts/relay.sh:*)",
+      "Bash(bash scripts/relay.sh:*)",
+      "Bash(scripts/agy-run.sh:*)",
+      "Bash(bash scripts/agy-run.sh:*)",
+      "Bash(scripts/codex-run.sh:*)",
+      "Bash(bash scripts/codex-run.sh:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git log:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(date:*)",
+      "Bash(mkdir -p .agc:*)",
+      "Edit(.agc/**)",
+      "Write(.agc/**)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)"
+    ]
+  }
+}
