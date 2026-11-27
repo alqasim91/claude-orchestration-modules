@@ -22,6 +22,7 @@ Setup guides and ready-to-copy files for running Claude Code (Opus) as the plann
 | **Claude + Antigravity + Opencode (Flash)** | Claude Pro + Google AI Pro (OpenCode is free) | Combines Claude + Antigravity (Flash) and Claude + Opencode. Outside models run from scripts, with no relay agent. Flash builds exact mini-tasks first, Neon builds the rest and fixes Flash's work, and Carbon (medium/high only) is the escalation after Neon and for long-horizon hard reasoning. All Gemini models share one quota pool; when it is drained, OpenCode free models take over silently (and handle scouting, images, big inputs). Claude plan designs, reviews and fixes. Claude only fallback. | [Claude + Antigravity + Opencode (Flash)](<Claude + Antigravity + Opencode (Flash)>) |
 | **Claude + Antigravity (Hydrogen)** | Claude Pro + Google AI Pro | Opus plans in waves. Gemini 4 Hydrogen (high) builds every non-design task; Gemini 4 Neon takes the hard ones and takes over if Hydrogen fails review too often; Gemini 4 Carbon (medium/high only) is the escalation after Neon and for long-horizon hard reasoning; Flash only scouts. Argon is not used. All Gemini models share one quota pool, with no Gemini fallback when it is drained (follow the drained-pool question). Fix ladder Hydrogen, Neon, Carbon, Sonnet, Opus. Quota fallback. | [Claude + Antigravity (Hydrogen)](<Claude + Antigravity (Hydrogen)>) |
 | **Claude + Antigravity + Opencode (Hydrogen)** | Claude Pro + Google AI Pro (OpenCode free models need no plan) | Claude + Antigravity + Opencode (Flash) with Gemini 4 Hydrogen as the default builder (scored about the same as Argon on one index (secondary source, unverified)) for exact mini-tasks and bulk work. OpenCode free models are the overflow and fallback and handle scouting, images and big inputs. Gemini 4 Neon takes the hard tasks; Gemini 4 Carbon (medium/high only) is the escalation after Neon and for long-horizon hard reasoning; Flash is a scout fallback. Argon is not used. All Gemini models share one quota pool; when it is drained there is no Gemini fallback and OpenCode takes over silently. Fix ladder Hydrogen, Neon, Carbon, Sonnet, Opus. Claude plan designs, reviews and fixes. Claude only fallback. | [Claude + Antigravity + Opencode (Hydrogen)](<Claude + Antigravity + Opencode (Hydrogen)>) |
+| **Claude + Antigravity + Codex** | Claude Pro + Google AI Pro + ChatGPT Plus | Opus plans, then one call per task to `scripts/relay.sh`, which runs the whole loop with no Claude in between. Gemini 4 Hydrogen (high) builds, Gemini 4 Neon takes the hard tasks, and GPT 6.2 Sol reviews read-only through `codex exec`; Terra does docs, Luna scouts, Astra is a medium-only escalation. Fixes go back to the builder family, then agy Sonnet/Opus, with Claude Sonnet/Opus reviews (800-line rule). Design and shell work stay on Claude. Gemini and Codex pools drain separately: 5-hour limits wait, weekly limits switch family, and when both are drained it asks you before switching to Claude only. | [Claude + Antigravity + Codex](<Claude + Antigravity + Codex>) |
 
 Open the module's `README.md` for the step-by-step setup on Mac and Windows, and `test-prompt.md` for a ready test prompt. Every module can be set up from inside Claude Code: drop its zip into your project folder and paste one line (see the module's README). A one-command installer is there too.
 
@@ -123,5 +124,18 @@ Claude + Antigravity + Opencode (Hydrogen)/
   scripts/agy-run.sh                    agy runner (go to scripts/, chmod +x)
   scripts/opencode-run.sh               OpenCode runner (go to scripts/, chmod +x)
   claude-antigravity-opencode-hydrogen-files.zip                   the same files, zipped
+  test-prompt.md
+Claude + Antigravity + Codex/
+  README.md                             steps and how it works
+  CLAUDE.md                             routing rules (project root)
+  AGENTS.md                             shared rules for all builders (project root)
+  install.sh / install.ps1              one-command installer (Mac, Linux, Windows)
+  SETUP.md                              setup steps Claude Code follows
+  settings.json                         approvals list (merged into .claude/settings.json)
+  agents/                               7 subagents (go to .claude/agents/)
+  rules/                                on-demand rule files (go to .claude/agc/)
+  scripts/relay.sh                      agy<->Codex loop runner (go to scripts/, chmod +x)
+  scripts/agy-run.sh, codex-run.sh      agy and Codex runners (go to scripts/, chmod +x)
+  claude-antigravity-codex-files.zip    the same files, zipped
   test-prompt.md
 ```
